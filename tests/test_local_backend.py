@@ -3,13 +3,13 @@ from __future__ import annotations
 
 import pytest
 
-from zed_rebac import (
+from rebac import (
     LocalBackend,
     ObjectRef,
     RelationshipTuple,
     SubjectRef,
 )
-from zed_rebac.schema import parse_zed
+from rebac.schema import parse_zed
 
 
 SCHEMA_TEXT = """

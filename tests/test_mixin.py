@@ -1,9 +1,9 @@
-"""End-to-end tests of ZedRBACMixin scoping."""
+"""End-to-end tests of RebacMixin scoping."""
 from __future__ import annotations
 
 import pytest
 
-from zed_rebac import (
+from rebac import (
     MissingActorError,
     ObjectRef,
     PermissionDenied,
@@ -13,9 +13,9 @@ from zed_rebac import (
     sudo,
     write_relationships,
 )
-from zed_rebac.actors import _current_actor
-from zed_rebac.backends import reset_backend
-from zed_rebac.schema import parse_zed
+from rebac.actors import _current_actor
+from rebac.backends import reset_backend
+from rebac.schema import parse_zed
 
 
 SCHEMA_TEXT = """
@@ -105,7 +105,7 @@ def test_save_blocked_for_non_owner(alice, bob, post):
     # Bob loads the post via sudo, then tries to save under his own actor.
     with sudo(reason="test.load"):
         instance = Post.objects.get(pk=post.pk)
-    instance._zed_actor = SubjectRef.of("auth/user", str(bob.pk))
+    instance._rebac_actor = SubjectRef.of("auth/user", str(bob.pk))
     instance.title = "hijacked"
     with pytest.raises(PermissionDenied):
         instance.save()
@@ -115,7 +115,7 @@ def test_save_allowed_for_owner(alice, post):
     _grant_owner(alice, post)
     from tests.testapp.models import Post
     instance = Post.objects.as_user(alice).get(pk=post.pk)
-    assert instance._zed_actor is not None
+    assert instance._rebac_actor is not None
     instance.title = "renamed"
     instance.save()
 

@@ -1,4 +1,4 @@
-"""Settings access. All values prefixed `ZED_REBAC_`. No nested dicts.
+"""Settings access. All values prefixed `REBAC_`. No nested dicts.
 
 Read via the public `app_settings` proxy — never call `getattr(settings, ...)`
 directly inside the package; use `app_settings.<KEY>`.
@@ -12,28 +12,28 @@ from django.test.signals import setting_changed
 
 
 _DEFAULTS: dict[str, Any] = {
-    "ZED_REBAC_BACKEND": "local",
-    "ZED_REBAC_RELATIONSHIP_MODEL": "zed_rebac.Relationship",
-    "ZED_REBAC_SPICEDB_ENDPOINT": None,
-    "ZED_REBAC_SPICEDB_TOKEN": None,
-    "ZED_REBAC_SPICEDB_TLS": True,
-    "ZED_REBAC_SPICEDB_AUTO_WRITE_SCHEMA": True,
-    "ZED_REBAC_SCHEMA_DIR": None,  # resolves to BASE_DIR/zed-rebac at use site
-    "ZED_REBAC_DEPTH_LIMIT": 8,
-    "ZED_REBAC_DEFAULT_CONSISTENCY": "minimize_latency",
-    "ZED_REBAC_CACHE_ALIAS": "default",
-    "ZED_REBAC_LOOKUP_CACHE_TTL": 60,
-    "ZED_REBAC_PK_IN_THRESHOLD": 10000,
-    "ZED_REBAC_STRICT_MODE": True,
-    "ZED_REBAC_REQUIRE_SUDO_REASON": True,
-    "ZED_REBAC_ALLOW_SUDO": True,
-    "ZED_REBAC_GC_INTERVAL_SECONDS": 300,
-    "ZED_REBAC_ACTOR_RESOLVER": "zed_rebac.actors.default_resolver",
-    "ZED_REBAC_TYPE_PREFIX": "",
-    "ZED_REBAC_SUPERUSER_BYPASS": True,
-    "ZED_REBAC_SYNC_DJANGO_GROUPS": False,
-    "ZED_REBAC_USER_TYPE": "auth/user",
-    "ZED_REBAC_GROUP_TYPE": "auth/group",
+    "REBAC_BACKEND": "local",
+    "REBAC_RELATIONSHIP_MODEL": "rebac.Relationship",
+    "REBAC_SPICEDB_ENDPOINT": None,
+    "REBAC_SPICEDB_TOKEN": None,
+    "REBAC_SPICEDB_TLS": True,
+    "REBAC_SPICEDB_AUTO_WRITE_SCHEMA": True,
+    "REBAC_SCHEMA_DIR": None,  # resolves to BASE_DIR/zed-rebac at use site
+    "REBAC_DEPTH_LIMIT": 8,
+    "REBAC_DEFAULT_CONSISTENCY": "minimize_latency",
+    "REBAC_CACHE_ALIAS": "default",
+    "REBAC_LOOKUP_CACHE_TTL": 60,
+    "REBAC_PK_IN_THRESHOLD": 10000,
+    "REBAC_STRICT_MODE": True,
+    "REBAC_REQUIRE_SUDO_REASON": True,
+    "REBAC_ALLOW_SUDO": True,
+    "REBAC_GC_INTERVAL_SECONDS": 300,
+    "REBAC_ACTOR_RESOLVER": "rebac.actors.default_resolver",
+    "REBAC_TYPE_PREFIX": "",
+    "REBAC_SUPERUSER_BYPASS": True,
+    "REBAC_SYNC_DJANGO_GROUPS": False,
+    "REBAC_USER_TYPE": "auth/user",
+    "REBAC_GROUP_TYPE": "auth/group",
 }
 
 

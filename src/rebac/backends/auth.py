@@ -1,4 +1,4 @@
-"""ZedRBACBackend — Django auth backend that routes per-object `has_perm` through REBAC."""
+"""RebacBackend — Django auth backend that routes per-object `has_perm` through REBAC."""
 from __future__ import annotations
 
 from typing import Any
@@ -7,7 +7,7 @@ from ..codenames import codename_to_action
 from ..conf import app_settings
 
 
-class ZedRBACBackend:
+class RebacBackend:
     """Adds per-object permission checks routed through the REBAC engine.
 
     Add to AUTHENTICATION_BACKENDS *before* `ModelBackend`. Does not authenticate
@@ -23,7 +23,7 @@ class ZedRBACBackend:
             return False
         if obj is None:
             return False
-        if app_settings.ZED_REBAC_SUPERUSER_BYPASS and getattr(user_obj, "is_superuser", False):
+        if app_settings.REBAC_SUPERUSER_BYPASS and getattr(user_obj, "is_superuser", False):
             return True
         action = codename_to_action(perm)
         if action is None:

@@ -4,30 +4,30 @@ from __future__ import annotations
 from django.core.exceptions import PermissionDenied as DjangoPermissionDenied
 
 
-class ZedRebacError(Exception):
-    """Base for all zed_rebac errors."""
+class RebacError(Exception):
+    """Base for all rebac errors."""
 
 
-class PermissionDenied(DjangoPermissionDenied, ZedRebacError):
+class PermissionDenied(DjangoPermissionDenied, RebacError):
     """Raised when an actor is denied access to a resource.
 
     Subclasses Django's `PermissionDenied` so view-layer 403 handlers continue
-    to work without zed_rebac-specific wiring.
+    to work without rebac-specific wiring.
     """
 
 
-class MissingActorError(ZedRebacError):
+class MissingActorError(RebacError):
     """Raised when a queryset materialises with no actor and strict mode is on.
 
-    Strict-by-default: ZED_REBAC_STRICT_MODE = True (production default).
+    Strict-by-default: REBAC_STRICT_MODE = True (production default).
     """
 
 
-class NoActorResolvedError(ZedRebacError):
+class NoActorResolvedError(RebacError):
     """Resolution chain produced no SubjectRef for the request."""
 
 
-class CaveatUnsupportedError(ZedRebacError):
+class CaveatUnsupportedError(RebacError):
     """Caveat references a CEL feature the active backend cannot evaluate.
 
     For example, the `ipaddress` CEL type is not supported by `cel-python`;
@@ -36,17 +36,17 @@ class CaveatUnsupportedError(ZedRebacError):
     """
 
 
-class PermissionDepthExceeded(ZedRebacError):
-    """Recursive permission walk hit `ZED_REBAC_DEPTH_LIMIT`."""
+class PermissionDepthExceeded(RebacError):
+    """Recursive permission walk hit `REBAC_DEPTH_LIMIT`."""
 
 
-class SchemaError(ZedRebacError):
+class SchemaError(RebacError):
     """Schema-level error (parse failure, undefined reference, etc.)."""
 
 
-class SudoNotAllowedError(ZedRebacError):
-    """`sudo()` called when ZED_REBAC_ALLOW_SUDO is False."""
+class SudoNotAllowedError(RebacError):
+    """`sudo()` called when REBAC_ALLOW_SUDO is False."""
 
 
-class SudoReasonRequiredError(ZedRebacError):
-    """`sudo()` called without `reason=` and ZED_REBAC_REQUIRE_SUDO_REASON is True."""
+class SudoReasonRequiredError(RebacError):
+    """`sudo()` called without `reason=` and REBAC_REQUIRE_SUDO_REASON is True."""

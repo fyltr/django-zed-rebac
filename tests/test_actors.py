@@ -3,17 +3,17 @@ from __future__ import annotations
 
 import pytest
 
-from zed_rebac import (
+from rebac import (
     NoActorResolvedError,
     SubjectRef,
     actor_context,
     current_actor,
     sudo,
     to_subject_ref,
-    zed_subject,
+    rebac_subject,
 )
-from zed_rebac.actors import is_sudo, current_sudo_reason
-from zed_rebac.errors import SudoReasonRequiredError
+from rebac.actors import is_sudo, current_sudo_reason
+from rebac.errors import SudoReasonRequiredError
 
 
 def test_subject_ref_passes_through():
@@ -45,8 +45,8 @@ def test_anonymous_or_unknown_raises():
         to_subject_ref(object())
 
 
-def test_zed_subject_decorator_registers():
-    @zed_subject(type="auth/apikey", id_attr="public_id")
+def test_rebac_subject_decorator_registers():
+    @rebac_subject(type="auth/apikey", id_attr="public_id")
     class ApiKey:
         def __init__(self, public_id: str) -> None:
             self.public_id = public_id

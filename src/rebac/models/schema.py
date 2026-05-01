@@ -8,7 +8,7 @@ class SchemaDefinition(models.Model):
     resource_type = models.CharField(max_length=64, unique=True)
 
     class Meta:
-        app_label = "zed_rebac"
+        app_label = "rebac"
 
     def __str__(self) -> str:
         return self.resource_type
@@ -25,7 +25,7 @@ class SchemaRelation(models.Model):
     with_expiration = models.BooleanField(default=False)
 
     class Meta:
-        app_label = "zed_rebac"
+        app_label = "rebac"
         unique_together = [("definition", "name")]
 
     def __str__(self) -> str:
@@ -40,7 +40,7 @@ class SchemaPermission(models.Model):
     expression = models.TextField()
 
     class Meta:
-        app_label = "zed_rebac"
+        app_label = "rebac"
         unique_together = [("definition", "name")]
 
     def __str__(self) -> str:
@@ -54,7 +54,7 @@ class SchemaCaveat(models.Model):
     expression = models.TextField()
 
     class Meta:
-        app_label = "zed_rebac"
+        app_label = "rebac"
 
     def __str__(self) -> str:
         return self.name

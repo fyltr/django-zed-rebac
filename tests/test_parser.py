@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import pytest
 
-from zed_rebac.schema import (
+from rebac.schema import (
     AllowedSubject,
     PermArrow,
     PermBinOp,
@@ -12,12 +12,12 @@ from zed_rebac.schema import (
     parse_zed,
     validate_schema,
 )
-from zed_rebac.schema.parser import ParseError
+from rebac.schema.parser import ParseError
 
 
 SAMPLE = """
-// @zed_package: blog
-// @zed_package_version: 0.1.0
+// @rebac_package: blog
+// @rebac_package_version: 0.1.0
 
 use typechecking
 
@@ -52,8 +52,8 @@ definition blog/folder {
 
 def test_parses_full_schema():
     schema = parse_zed(SAMPLE)
-    assert schema.headers["zed_package"] == "blog"
-    assert schema.headers["zed_package_version"] == "0.1.0"
+    assert schema.headers["rebac_package"] == "blog"
+    assert schema.headers["rebac_package_version"] == "0.1.0"
     assert "use typechecking" in schema.directives[0]
     assert {d.resource_type for d in schema.definitions} == {
         "auth/user",

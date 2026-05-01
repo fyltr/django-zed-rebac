@@ -22,7 +22,7 @@ class PackageManagedRecord(models.Model):
     last_synced_at = models.DateTimeField()
 
     class Meta:
-        app_label = "zed_rebac"
+        app_label = "rebac"
         unique_together = [("package", "external_id")]
         indexes = [models.Index(fields=["target_ct", "target_pk"])]
 

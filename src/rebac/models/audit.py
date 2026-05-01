@@ -31,7 +31,7 @@ class PermissionAuditEvent(models.Model):
     occurred_at = models.DateTimeField(auto_now_add=True, db_index=True)
 
     class Meta:
-        app_label = "zed_rebac"
+        app_label = "rebac"
         ordering = ["-occurred_at"]
 
     def __str__(self) -> str:

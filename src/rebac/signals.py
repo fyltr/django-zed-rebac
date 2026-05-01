@@ -10,26 +10,26 @@ from .actors import current_actor as _current_actor
 from .actors import is_sudo as _is_sudo
 from .conf import app_settings
 from .errors import MissingActorError, PermissionDenied
-from .mixins import ZedRBACMixin
+from .mixins import RebacMixin
 from .types import ObjectRef
 
 
 @receiver(pre_save)
-def _zed_pre_save(sender: type, instance: Any, raw: bool = False, using: Any = None, **_: Any) -> None:
+def _rebac_pre_save(sender: type, instance: Any, raw: bool = False, using: Any = None, **_: Any) -> None:
     if raw:
         return
-    if not isinstance(instance, ZedRBACMixin):
+    if not isinstance(instance, RebacMixin):
         return
-    zed_type = getattr(sender._meta, "zed_resource_type", None)
-    if not zed_type:
+    rebac_type = getattr(sender._meta, "rebac_resource_type", None)
+    if not rebac_type:
         return
     if _is_sudo():
         return
 
     # Resolve actor: per-instance (set by from_db / queryset) → ambient.
-    actor = getattr(instance, "_zed_actor", None) or _current_actor()
+    actor = getattr(instance, "_rebac_actor", None) or _current_actor()
     if actor is None:
-        if app_settings.ZED_REBAC_STRICT_MODE:
+        if app_settings.REBAC_STRICT_MODE:
             raise MissingActorError(
                 f"{sender.__name__}.save() called with no actor. "
                 f"Use a queryset scoped via .with_actor()/.as_user()/.as_agent(), "
@@ -41,7 +41,7 @@ def _zed_pre_save(sender: type, instance: Any, raw: bool = False, using: Any = N
     action = "create" if is_create else "write"
 
     from .backends import backend
-    resource = ObjectRef(zed_type, "" if is_create else str(instance.pk))
+    resource = ObjectRef(rebac_type, "" if is_create else str(instance.pk))
     result = backend().check_access(subject=actor, action=action, resource=resource)
     if not result.allowed:
         raise PermissionDenied(
@@ -50,25 +50,25 @@ def _zed_pre_save(sender: type, instance: Any, raw: bool = False, using: Any = N
 
 
 @receiver(pre_delete)
-def _zed_pre_delete(sender: type, instance: Any, using: Any = None, **_: Any) -> None:
-    if not isinstance(instance, ZedRBACMixin):
+def _rebac_pre_delete(sender: type, instance: Any, using: Any = None, **_: Any) -> None:
+    if not isinstance(instance, RebacMixin):
         return
-    zed_type = getattr(sender._meta, "zed_resource_type", None)
-    if not zed_type:
+    rebac_type = getattr(sender._meta, "rebac_resource_type", None)
+    if not rebac_type:
         return
     if _is_sudo():
         return
 
-    actor = getattr(instance, "_zed_actor", None) or _current_actor()
+    actor = getattr(instance, "_rebac_actor", None) or _current_actor()
     if actor is None:
-        if app_settings.ZED_REBAC_STRICT_MODE:
+        if app_settings.REBAC_STRICT_MODE:
             raise MissingActorError(
                 f"{sender.__name__}.delete() called with no actor."
             )
         return
 
     from .backends import backend
-    resource = ObjectRef(zed_type, str(instance.pk))
+    resource = ObjectRef(rebac_type, str(instance.pk))
     result = backend().check_access(subject=actor, action="delete", resource=resource)
     if not result.allowed:
         raise PermissionDenied(f"Denied: {actor} cannot delete {resource}")

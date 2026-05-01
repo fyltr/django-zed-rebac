@@ -46,10 +46,10 @@ Issues = "https://github.com/apexive/django-zed-rebac/issues"
 
 [tool.setuptools.packages.find]
 where = ["src"]
-include = ["zed_rebac*"]
+include = ["rebac*"]
 
 [tool.setuptools.package-data]
-zed_rebac = ["py.typed"]
+rebac = ["py.typed"]
 
 [tool.pytest.ini_options]
 DJANGO_SETTINGS_MODULE = "tests.settings"

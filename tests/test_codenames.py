@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import pytest
 
-from zed_rebac.codenames import codename_to_action
+from rebac.codenames import codename_to_action
 
 
 @pytest.mark.parametrize(

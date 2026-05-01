@@ -20,7 +20,7 @@ class Relationship(models.Model):
     written_at_xid = models.BigIntegerField(default=0, db_index=True)
 
     class Meta:
-        app_label = "zed_rebac"
+        app_label = "rebac"
         verbose_name = "Relationship"
         verbose_name_plural = "Relationships"
         indexes = [
@@ -51,7 +51,7 @@ class Relationship(models.Model):
                     "optional_subject_relation",
                     "caveat_name",
                 ],
-                name="zed_rebac_relationship_uniq",
+                name="rebac_relationship_uniq",
             ),
         ]
 

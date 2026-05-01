@@ -1,7 +1,7 @@
 // Test schema for the synthetic Post / Folder models.
-// @zed_package: testapp
-// @zed_package_version: 0.1.0
-// @zed_schema_revision: 1
+// @rebac_package: testapp
+// @rebac_package_version: 0.1.0
+// @rebac_schema_revision: 1
 
 definition blog/post {
     relation owner: auth/user

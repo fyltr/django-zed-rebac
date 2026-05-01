@@ -1,12 +1,12 @@
 """django-zed-rebac — drop-in REBAC engine for Django.
 
-See docs/SPEC.md for the design contract. The Python module is `zed_rebac`
-(per the naming question in CLAUDE.md, choosing the lean `zed_rebac` form
+See docs/SPEC.md for the design contract. The Python module is `rebac`
+(per the naming question in CLAUDE.md, choosing the lean `rebac` form
 that matches Django convention: hyphens → underscores).
 
-Note: `ZedRBACMixin` is exposed via `__getattr__` so that this package can be
+Note: `RebacMixin` is exposed via `__getattr__` so that this package can be
 imported during Django app loading without tripping the model metaclass before
-the apps registry is ready. Use `from zed_rebac import ZedRBACMixin` from
+the apps registry is ready. Use `from rebac import RebacMixin` from
 *application code* (after Django setup); inside another package's models.py
 that's the supported import.
 """
@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING, Any
 
 __version__ = "0.1.0a0"
 
-default_app_config = "zed_rebac.apps.ZedRebacConfig"
+default_app_config = "rebac.apps.RebacConfig"
 
 from .actors import (
     ActorLike,
@@ -27,7 +27,7 @@ from .actors import (
     sudo,
     system_context,
     to_subject_ref,
-    zed_subject,
+    rebac_subject,
 )
 from .conf import app_settings
 from .errors import (
@@ -37,7 +37,7 @@ from .errors import (
     PermissionDenied,
     PermissionDepthExceeded,
     SchemaError,
-    ZedRebacError,
+    RebacError,
 )
 from .types import (
     CheckResult,
@@ -51,30 +51,30 @@ from .types import (
 
 if TYPE_CHECKING:
     from .backends import Backend, LocalBackend, SpiceDBBackend
-    from .mixins import ZedRBACMixin
-    from .decorators import require_permission, zed_resource
+    from .mixins import RebacMixin
+    from .decorators import require_permission, rebac_resource
     from .relationships import delete_relationships, write_relationships
     from .resources import to_object_ref
 
 
 _LAZY = {
-    "ZedRBACMixin": ("zed_rebac.mixins", "ZedRBACMixin"),
-    "Backend": ("zed_rebac.backends", "Backend"),
-    "LocalBackend": ("zed_rebac.backends", "LocalBackend"),
-    "SpiceDBBackend": ("zed_rebac.backends", "SpiceDBBackend"),
-    "backend": ("zed_rebac.backends", "backend"),
-    "require_permission": ("zed_rebac.decorators", "require_permission"),
-    "zed_resource": ("zed_rebac.decorators", "zed_resource"),
-    "write_relationships": ("zed_rebac.relationships", "write_relationships"),
-    "delete_relationships": ("zed_rebac.relationships", "delete_relationships"),
-    "to_object_ref": ("zed_rebac.resources", "to_object_ref"),
+    "RebacMixin": ("rebac.mixins", "RebacMixin"),
+    "Backend": ("rebac.backends", "Backend"),
+    "LocalBackend": ("rebac.backends", "LocalBackend"),
+    "SpiceDBBackend": ("rebac.backends", "SpiceDBBackend"),
+    "backend": ("rebac.backends", "backend"),
+    "require_permission": ("rebac.decorators", "require_permission"),
+    "rebac_resource": ("rebac.decorators", "rebac_resource"),
+    "write_relationships": ("rebac.relationships", "write_relationships"),
+    "delete_relationships": ("rebac.relationships", "delete_relationships"),
+    "to_object_ref": ("rebac.resources", "to_object_ref"),
 }
 
 
 def __getattr__(name: str) -> Any:
     target = _LAZY.get(name)
     if target is None:
-        raise AttributeError(f"module 'zed_rebac' has no attribute {name!r}")
+        raise AttributeError(f"module 'rebac' has no attribute {name!r}")
     from importlib import import_module
     module = import_module(target[0])
     return getattr(module, target[1])
@@ -90,11 +90,11 @@ __all__ = [
     "Zookie",
     "RelationshipTuple",
     # mixin / managers
-    "ZedRBACMixin",
+    "RebacMixin",
     # decorators
     "require_permission",
-    "zed_resource",
-    "zed_subject",
+    "rebac_resource",
+    "rebac_subject",
     # backends
     "Backend",
     "LocalBackend",
@@ -117,7 +117,7 @@ __all__ = [
     "PermissionDepthExceeded",
     "NoActorResolvedError",
     "SchemaError",
-    "ZedRebacError",
+    "RebacError",
     # helpers
     "write_relationships",
     "delete_relationships",

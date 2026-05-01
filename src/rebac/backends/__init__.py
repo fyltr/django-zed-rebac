@@ -1,6 +1,6 @@
 """Pluggable backends.
 
-`backend()` returns the singleton instance configured by `ZED_REBAC_BACKEND`.
+`backend()` returns the singleton instance configured by `REBAC_BACKEND`.
 The first call instantiates; subsequent calls return the cached instance.
 """
 from __future__ import annotations
@@ -25,14 +25,14 @@ def backend() -> Backend:
     global _backend
     if _backend is not None:
         return _backend
-    kind = app_settings.ZED_REBAC_BACKEND
+    kind = app_settings.REBAC_BACKEND
     if kind == "local":
         _backend = LocalBackend()
     elif kind == "spicedb":
         _backend = SpiceDBBackend()
     else:
         raise ValueError(
-            f"Unknown ZED_REBAC_BACKEND={kind!r} (expected 'local' or 'spicedb')"
+            f"Unknown REBAC_BACKEND={kind!r} (expected 'local' or 'spicedb')"
         )
     return _backend
 

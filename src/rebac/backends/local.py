@@ -7,12 +7,12 @@ rows in the `Relationship` table. Implementation strategy:
     resource_ids per visited relation. Final result is the union/intersection
     of contributors per the expression operators.
   - For `check_access()`: same walk, but bounded by the specific resource_id.
-  - Recursion depth bounded by `ZED_REBAC_DEPTH_LIMIT`.
+  - Recursion depth bounded by `REBAC_DEPTH_LIMIT`.
 
 This is intentionally a clean Python implementation — fully correct against
 the SpiceDB semantics for the subset of the schema language the parser
 accepts. A recursive-CTE optimisation path is layered on for `accessible()`
-when `ZED_REBAC_PK_IN_THRESHOLD` is exceeded; for v0.1 we use the Python walk
+when `REBAC_PK_IN_THRESHOLD` is exceeded; for v0.1 we use the Python walk
 with prefetched relationship rows. The same code path runs on Postgres / MySQL
 / SQLite identically.
 """
@@ -314,9 +314,9 @@ class LocalBackend(Backend):
     ) -> bool:
         # Depth counts dispatch hops (arrow walks + subject-set traversals),
         # not expression-tree shape. Binary operators don't increment depth.
-        if depth > app_settings.ZED_REBAC_DEPTH_LIMIT:
+        if depth > app_settings.REBAC_DEPTH_LIMIT:
             raise PermissionDepthExceeded(
-                f"Depth limit {app_settings.ZED_REBAC_DEPTH_LIMIT} exceeded"
+                f"Depth limit {app_settings.REBAC_DEPTH_LIMIT} exceeded"
             )
         if isinstance(expr, PermNil):
             return False
@@ -419,9 +419,9 @@ class LocalBackend(Backend):
     ) -> bool:
         # Subject-set rows count as a dispatch hop, so callers add 1 there;
         # the entry guard catches runaway recursion.
-        if depth > app_settings.ZED_REBAC_DEPTH_LIMIT:
+        if depth > app_settings.REBAC_DEPTH_LIMIT:
             raise PermissionDepthExceeded(
-                f"Depth limit {app_settings.ZED_REBAC_DEPTH_LIMIT} exceeded"
+                f"Depth limit {app_settings.REBAC_DEPTH_LIMIT} exceeded"
             )
         from ..models import Relationship as RelationshipModel
 
@@ -470,9 +470,9 @@ class LocalBackend(Backend):
         depth: int,
         cache: dict[tuple[str, str], set[str] | None],
     ) -> set[str]:
-        if depth > app_settings.ZED_REBAC_DEPTH_LIMIT:
+        if depth > app_settings.REBAC_DEPTH_LIMIT:
             raise PermissionDepthExceeded(
-                f"Depth limit {app_settings.ZED_REBAC_DEPTH_LIMIT} exceeded"
+                f"Depth limit {app_settings.REBAC_DEPTH_LIMIT} exceeded"
             )
         if isinstance(expr, PermNil):
             return set()
@@ -566,7 +566,7 @@ class LocalBackend(Backend):
         # the first iteration is final; recursive ones (folder.parent->folder.read)
         # converge in O(graph diameter) steps.
         prev: set[str] = set()
-        for _ in range(app_settings.ZED_REBAC_DEPTH_LIMIT + 1):
+        for _ in range(app_settings.REBAC_DEPTH_LIMIT + 1):
             cache[key] = prev
             current = self._resources_for_expr(
                 target_perm.expression, definition, subject, depth, cache
@@ -585,9 +585,9 @@ class LocalBackend(Backend):
         depth: int,
         cache: dict[tuple[str, str], set[str] | None] | None = None,
     ) -> set[str]:
-        if depth > app_settings.ZED_REBAC_DEPTH_LIMIT:
+        if depth > app_settings.REBAC_DEPTH_LIMIT:
             raise PermissionDepthExceeded(
-                f"Depth limit {app_settings.ZED_REBAC_DEPTH_LIMIT} exceeded"
+                f"Depth limit {app_settings.REBAC_DEPTH_LIMIT} exceeded"
             )
         from ..models import Relationship as RelationshipModel
 

@@ -3,10 +3,10 @@ from __future__ import annotations
 
 from django.db import models
 
-from zed_rebac import ZedRBACMixin
+from rebac import RebacMixin
 
 
-class Folder(ZedRBACMixin, models.Model):
+class Folder(RebacMixin, models.Model):
     name = models.CharField(max_length=100)
     parent = models.ForeignKey(
         "self", null=True, blank=True, on_delete=models.CASCADE, related_name="children"
@@ -14,10 +14,10 @@ class Folder(ZedRBACMixin, models.Model):
 
     class Meta:
         app_label = "testapp"
-        zed_resource_type = "blog/folder"
+        rebac_resource_type = "blog/folder"
 
 
-class Post(ZedRBACMixin, models.Model):
+class Post(RebacMixin, models.Model):
     title = models.CharField(max_length=200)
     body = models.TextField(blank=True, default="")
     folder = models.ForeignKey(
@@ -26,4 +26,4 @@ class Post(ZedRBACMixin, models.Model):
 
     class Meta:
         app_label = "testapp"
-        zed_resource_type = "blog/post"
+        rebac_resource_type = "blog/post"

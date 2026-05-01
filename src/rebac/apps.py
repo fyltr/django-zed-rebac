@@ -4,11 +4,11 @@ from __future__ import annotations
 from django.apps import AppConfig
 
 
-class ZedRebacConfig(AppConfig):
+class RebacConfig(AppConfig):
     default_auto_field = "django.db.models.BigAutoField"
-    name = "zed_rebac"
-    verbose_name = "ZED-REBAC"
-    label = "zed_rebac"
+    name = "rebac"
+    verbose_name = "REBAC"
+    label = "rebac"
     default = True
 
     def ready(self) -> None:

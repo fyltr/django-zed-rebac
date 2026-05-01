@@ -63,9 +63,9 @@ db.sqlite3-journal
 media/
 staticfiles/
 
-# --- Build artefacts (zed_rebac specific) -----------------------------------
-zed-rebac/effective.zed
-zed-rebac/
+# --- Build artefacts (rebac specific) -----------------------------------
+rebac/effective.zed
+rebac/
 
 # --- Notebooks ---------------------------------------------------------------
 .ipynb_checkpoints/

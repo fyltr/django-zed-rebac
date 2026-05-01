@@ -14,12 +14,12 @@ DATABASES = {
 INSTALLED_APPS = [
     "django.contrib.auth",
     "django.contrib.contenttypes",
-    "zed_rebac",
+    "rebac",
     "tests.testapp",
 ]
 
 AUTHENTICATION_BACKENDS = [
-    "zed_rebac.backends.auth.ZedRBACBackend",
+    "rebac.backends.auth.RebacBackend",
     "django.contrib.auth.backends.ModelBackend",
 ]
 
@@ -27,8 +27,8 @@ USE_TZ = True
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 # Make tests deterministic — strict mode ON.
-ZED_REBAC_BACKEND = "local"
-ZED_REBAC_STRICT_MODE = True
-ZED_REBAC_REQUIRE_SUDO_REASON = True
-ZED_REBAC_ALLOW_SUDO = True
-ZED_REBAC_SUPERUSER_BYPASS = False
+REBAC_BACKEND = "local"
+REBAC_STRICT_MODE = True
+REBAC_REQUIRE_SUDO_REASON = True
+REBAC_ALLOW_SUDO = True
+REBAC_SUPERUSER_BYPASS = False

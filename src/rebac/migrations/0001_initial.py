@@ -66,7 +66,7 @@ class Migration(migrations.Migration):
                     "optional_subject_relation",
                     "caveat_name",
                 ),
-                name="zed_rebac_relationship_uniq",
+                name="rebac_relationship_uniq",
             ),
         ),
         migrations.CreateModel(
@@ -89,7 +89,7 @@ class Migration(migrations.Migration):
                     models.ForeignKey(
                         on_delete=django.db.models.deletion.CASCADE,
                         related_name="relations",
-                        to="zed_rebac.schemadefinition",
+                        to="rebac.schemadefinition",
                     ),
                 ),
             ],
@@ -106,7 +106,7 @@ class Migration(migrations.Migration):
                     models.ForeignKey(
                         on_delete=django.db.models.deletion.CASCADE,
                         related_name="permissions",
-                        to="zed_rebac.schemadefinition",
+                        to="rebac.schemadefinition",
                     ),
                 ),
             ],

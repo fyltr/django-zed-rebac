@@ -1,7 +1,7 @@
 """SpiceDBBackend — adapter for the official `authzed-py` client.
 
 Stub for v0.1. Real implementation lands in 0.5 per the roadmap. The class
-exists so `ZED_REBAC_BACKEND = "spicedb"` raises a clear ImportError today,
+exists so `REBAC_BACKEND = "spicedb"` raises a clear ImportError today,
 not a generic AttributeError.
 """
 from __future__ import annotations
@@ -36,13 +36,13 @@ class SpiceDBBackend(Backend):
             import authzed  # noqa: F401
         except ImportError as exc:  # pragma: no cover
             raise ImportError(
-                "ZED_REBAC_BACKEND='spicedb' requires the `authzed` package. "
+                "REBAC_BACKEND='spicedb' requires the `authzed` package. "
                 "Install with: pip install django-zed-rebac[spicedb]"
             ) from exc
-        if not app_settings.ZED_REBAC_SPICEDB_ENDPOINT:
+        if not app_settings.REBAC_SPICEDB_ENDPOINT:
             raise RuntimeError(
-                "ZED_REBAC_SPICEDB_ENDPOINT must be set when "
-                "ZED_REBAC_BACKEND='spicedb'"
+                "REBAC_SPICEDB_ENDPOINT must be set when "
+                "REBAC_BACKEND='spicedb'"
             )
         # Real client wiring is deferred to v0.5.
         raise NotImplementedError(

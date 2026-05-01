@@ -35,7 +35,7 @@ class SchemaOverride(models.Model):
     expires_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
-        app_label = "zed_rebac"
+        app_label = "rebac"
         indexes = [models.Index(fields=["target_ct", "target_pk"])]
 
     def __str__(self) -> str:

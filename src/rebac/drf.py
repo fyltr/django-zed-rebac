@@ -1,4 +1,4 @@
-"""DRF integration: ZedPermission + ZedFilterBackend.
+"""DRF integration: RebacPermission + RebacFilterBackend.
 
 Soft-imports `rest_framework` so the module can be imported without DRF
 installed. Importing the names from this module raises `ImportError` only
@@ -31,12 +31,12 @@ _DEFAULT_ACTION_MAP = {
 
 if _HAS_DRF:
 
-    class ZedPermission(_drf_perms.BasePermission):  # type: ignore[misc]
+    class RebacPermission(_drf_perms.BasePermission):  # type: ignore[misc]
         """Routes per-action permission through `backend().has_access`.
 
         Override `action_map` to customise:
-            class MyPerm(ZedPermission):
-                action_map = {**ZedPermission.action_map, "publish": "publish"}
+            class MyPerm(RebacPermission):
+                action_map = {**RebacPermission.action_map, "publish": "publish"}
         """
 
         action_map = _DEFAULT_ACTION_MAP
@@ -47,8 +47,8 @@ if _HAS_DRF:
             from .errors import NoActorResolvedError
 
             action_name = getattr(view, "action", None) or request.method.lower()
-            zed_action = self.action_map.get(action_name)
-            if zed_action is None:
+            rebac_action = self.action_map.get(action_name)
+            if rebac_action is None:
                 return True
 
             user = getattr(request, "user", None)
@@ -61,9 +61,9 @@ if _HAS_DRF:
             if subject is None:
                 return False
 
-            zed_type = getattr(getattr(view, "queryset", None), "model", None)
-            zed_type = getattr(getattr(zed_type, "_meta", None), "zed_resource_type", None)
-            if not zed_type:
+            rebac_type = getattr(getattr(view, "queryset", None), "model", None)
+            rebac_type = getattr(getattr(rebac_type, "_meta", None), "rebac_resource_type", None)
+            if not rebac_type:
                 return True
 
             from .types import ObjectRef
@@ -71,8 +71,8 @@ if _HAS_DRF:
             # Model-level check (empty resource_id) for create/list.
             return backend().has_access(
                 subject=subject,
-                action=zed_action,
-                resource=ObjectRef(zed_type, ""),
+                action=rebac_action,
+                resource=ObjectRef(rebac_type, ""),
             )
 
         def has_object_permission(self, request: Any, view: Any, obj: Any) -> bool:
@@ -82,8 +82,8 @@ if _HAS_DRF:
             from .resources import to_object_ref
 
             action_name = getattr(view, "action", None) or request.method.lower()
-            zed_action = self.action_map.get(action_name)
-            if zed_action is None:
+            rebac_action = self.action_map.get(action_name)
+            if rebac_action is None:
                 return True
 
             user = getattr(request, "user", None)
@@ -100,9 +100,9 @@ if _HAS_DRF:
                 resource = to_object_ref(obj)
             except TypeError:
                 return True
-            return backend().has_access(subject=subject, action=zed_action, resource=resource)
+            return backend().has_access(subject=subject, action=rebac_action, resource=resource)
 
-    class ZedFilterBackend(_drf_filters.BaseFilterBackend):  # type: ignore[misc]
+    class RebacFilterBackend(_drf_filters.BaseFilterBackend):  # type: ignore[misc]
         """Scopes a viewset's queryset to the actor."""
 
         def filter_queryset(self, request: Any, queryset: Any, view: Any) -> Any:
@@ -115,16 +115,16 @@ if _HAS_DRF:
 
 else:  # pragma: no cover
 
-    class ZedPermission:  # type: ignore[no-redef]
+    class RebacPermission:  # type: ignore[no-redef]
         def __init__(self, *args: Any, **kwargs: Any) -> None:
             raise ImportError(
-                "ZedPermission requires djangorestframework. "
+                "RebacPermission requires djangorestframework. "
                 "pip install django-zed-rebac[drf]"
             )
 
-    class ZedFilterBackend:  # type: ignore[no-redef]
+    class RebacFilterBackend:  # type: ignore[no-redef]
         def __init__(self, *args: Any, **kwargs: Any) -> None:
             raise ImportError(
-                "ZedFilterBackend requires djangorestframework. "
+                "RebacFilterBackend requires djangorestframework. "
                 "pip install django-zed-rebac[drf]"
             )

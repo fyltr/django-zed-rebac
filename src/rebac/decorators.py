@@ -6,11 +6,11 @@ from typing import Any, Callable
 
 from .actors import current_actor, is_sudo
 from .errors import NoActorResolvedError, PermissionDenied
-from .resources import to_object_ref, zed_resource as _zed_resource_register
+from .resources import to_object_ref, rebac_resource as _rebac_resource_register
 from .types import ObjectRef
 
 
-zed_resource = _zed_resource_register
+rebac_resource = _rebac_resource_register
 
 
 def require_permission(

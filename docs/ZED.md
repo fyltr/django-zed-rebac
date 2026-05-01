@@ -1,4 +1,4 @@
-# Defining Permissions in `django-zed_rebac`
+# Defining Permissions in `django-zed-rebac`
 
 > Last updated: 2026-05-01
 > Status: **draft for review** — first public guide.
@@ -6,7 +6,7 @@
 
 ---
 
-## What is a "schema" in `django-zed_rebac`?
+## What is a "schema" in `django-zed-rebac`?
 
 A **schema** is a typed graph of who-can-do-what, expressed in SpiceDB's `.zed` schema language. It defines:
 
@@ -15,7 +15,7 @@ A **schema** is a typed graph of who-can-do-what, expressed in SpiceDB's `.zed` 
 3. **Permissions** computed from those relations (`permission read = owner + viewer`).
 4. **Caveats** — runtime-context predicates (`caveat ip_in_cidr(ip, cidr) { ip.in_cidr(cidr) }`).
 
-You author it in **Python** using the `schema as s` builder. The plugin compiles it to a deterministic `.zed` file at `python manage.py zed_rebac build` time. Both backends (`LocalBackend`, `SpiceDBBackend`) consume the same compiled output.
+You author it in **Python** using the `schema as s` builder. The plugin compiles it to a deterministic `.zed` file at `python manage.py rebac build` time. Both backends (`LocalBackend`, `SpiceDBBackend`) consume the same compiled output.
 
 This document is the user-facing guide: how to author the schema for the entities Django projects actually have. The implementation details (build pipeline, backends, manager wiring) are in [SPEC.md](./SPEC.md).
 
@@ -27,9 +27,9 @@ Three lines of Python make a model permission-aware:
 
 ```python
 from django.db import models
-from zed_rebac import ZedRBACMixin, schema as s
+from rebac import RebacMixin, schema as s
 
-class Post(ZedRBACMixin, models.Model):
+class Post(RebacMixin, models.Model):
     class Meta:
         permission_relations = [
             s.relation("owner",   to="auth/user"),
@@ -38,7 +38,7 @@ class Post(ZedRBACMixin, models.Model):
         ]
 ```
 
-After `python manage.py zed_rebac build` you get this fragment in `zed_rebac/schema.zed`:
+After `python manage.py rebac build` you get this fragment in `rebac/schema.zed`:
 
 ```zed
 definition blog/post {
@@ -52,7 +52,7 @@ definition blog/post {
 `Post.objects.with_actor(request.user).all()` now returns only posts the user is the `owner` of. (`with_actor()` is the generic verb; `Post.objects.as_user(request.user)` is the typed shorthand for the Django-User case — same result.) To grant access, write a relationship:
 
 ```python
-from zed_rebac import backend, ObjectRef, SubjectRef, RelationshipTuple
+from rebac import backend, ObjectRef, SubjectRef, RelationshipTuple
 
 backend().write_relationships([
     ("create", RelationshipTuple(
@@ -67,7 +67,7 @@ backend().write_relationships([
 
 ## The schema-builder API
 
-Five primitives, all importable from `zed_rebac.schema`:
+Five primitives, all importable from `rebac.schema`:
 
 | Builder call | What it produces in `.zed` |
 |---|---|
@@ -83,7 +83,7 @@ For schema fragments that aren't tied to a single model — base subject types l
 
 ```python
 # blog/permissions.py
-from zed_rebac import schema as s
+from rebac import schema as s
 
 # Standalone definitions outside of any specific Meta:
 s.definition("blog/category", relations=[
@@ -99,7 +99,7 @@ s.caveat(
 )
 ```
 
-The `zed_rebac` AppConfig auto-discovers `permissions.py` in every installed app at app-ready (importlib-style — same pattern as `admin.py`, `signals.py`).
+The `rebac` AppConfig auto-discovers `permissions.py` in every installed app at app-ready (importlib-style — same pattern as `admin.py`, `signals.py`).
 
 ---
 
@@ -131,12 +131,12 @@ The build emits `use typechecking` at the top of `schema.zed`, which catches the
 
 ### Users and Groups (the `django.contrib.auth` integration)
 
-`django-zed_rebac` does not ship a `User` model. It declares two base types — `auth/user` and `auth/group` — and assumes Django's `User` and `Group` provide the actual rows.
+`django-zed-rebac` does not ship a `User` model. It declares two base types — `auth/user` and `auth/group` — and assumes Django's `User` and `Group` provide the actual rows.
 
 #### The base types (auto-emitted)
 
 ```zed
-// emitted by zed_rebac itself; you don't write this
+// emitted by rebac itself; you don't write this
 definition auth/user {}
 
 definition auth/group {
@@ -149,7 +149,7 @@ definition auth/group {
 #### Granting a relation to a Group
 
 ```python
-class Post(ZedRBACMixin, models.Model):
+class Post(RebacMixin, models.Model):
     class Meta:
         permission_relations = [
             s.relation("owner",  to="auth/user"),
@@ -182,7 +182,7 @@ Anyone in the `editors` group now has `read` permission on the post.
 The plugin ships an opt-in signal handler that mirrors `User.groups` changes into `Relationship` rows of the form `auth/group:<id>#member @ auth/user:<id>`. Enable via:
 
 ```python
-ZED_REBAC_SYNC_DJANGO_GROUPS = True
+REBAC_SYNC_DJANGO_GROUPS = True
 ```
 
 This is a one-way sync (Django → REBAC). If you want bidirectional sync, you're in custom-territory.
@@ -219,7 +219,7 @@ backend().write_relationships([
 The classic recursive permission. A user has `read` on a file if they have `read` on its parent folder.
 
 ```python
-class Folder(ZedRBACMixin, models.Model):
+class Folder(RebacMixin, models.Model):
     parent = models.ForeignKey("self", null=True, blank=True, on_delete=models.CASCADE)
 
     class Meta:
@@ -233,7 +233,7 @@ class Folder(ZedRBACMixin, models.Model):
         ]
 
 
-class File(ZedRBACMixin, models.Model):
+class File(RebacMixin, models.Model):
     folder = models.ForeignKey(Folder, on_delete=models.CASCADE)
 
     class Meta:
@@ -247,7 +247,7 @@ class File(ZedRBACMixin, models.Model):
         ]
 ```
 
-The `parent->read` arrow operator says "walk to the parent, then check `read` over there". Recursion is bounded by `ZED_REBAC_DEPTH_LIMIT` (default 8). For folder trees deeper than 8, callers receive `PermissionDepthExceeded` — at that point, switch to `SpiceDBBackend` (which also caps depth, but at 50 by default and with substantially better performance for deep walks).
+The `parent->read` arrow operator says "walk to the parent, then check `read` over there". Recursion is bounded by `REBAC_DEPTH_LIMIT` (default 8). For folder trees deeper than 8, callers receive `PermissionDepthExceeded` — at that point, switch to `SpiceDBBackend` (which also caps depth, but at 50 by default and with substantially better performance for deep walks).
 
 **Multi-hop arrows are NOT supported.** You cannot write `parent->parent->read`. The above pattern works because `read` itself recurses through `parent->read` — that's how multi-hop traversal is expressed in SpiceDB.
 
@@ -261,7 +261,7 @@ Modern SpiceDB schemas (v1.40+) support relationship expiration as a first-class
 # In permissions.py:
 s.directive("use expiration")  # added once at the top of the schema
 
-class Post(ZedRBACMixin, models.Model):
+class Post(RebacMixin, models.Model):
     class Meta:
         permission_relations = [
             s.relation("owner",            to="auth/user"),
@@ -286,7 +286,7 @@ backend().write_relationships([
 ])
 ```
 
-After 24 hours, `LocalBackend` excludes the row from query results; the GC task (`zed_rebac.gc.expire_relationships`) deletes it permanently within `ZED_REBAC_GC_INTERVAL_SECONDS` (default 5 minutes).
+After 24 hours, `LocalBackend` excludes the row from query results; the GC task (`rebac.gc.expire_relationships`) deletes it permanently within `REBAC_GC_INTERVAL_SECONDS` (default 5 minutes).
 
 ### Conditional access (caveats — runtime context)
 
@@ -310,7 +310,7 @@ s.caveat(
 In a model:
 
 ```python
-class SensitiveDoc(ZedRBACMixin, models.Model):
+class SensitiveDoc(RebacMixin, models.Model):
     class Meta:
         permission_relations = [
             s.relation("owner",  to="auth/user"),
@@ -373,10 +373,10 @@ s.definition("mcp/tool/edit_post", relations=[
 Wire the tool with the plugin's MCP decorator:
 
 ```python
-from zed_rebac.mcp import zed_mcp_tool
+from rebac.mcp import rebac_mcp_tool
 
 @mcp.tool
-@zed_mcp_tool(resource_type="mcp/tool/query_posts", action="invoke")
+@rebac_mcp_tool(resource_type="mcp/tool/query_posts", action="invoke")
 async def query_posts(query: str, ctx: Context = CurrentContext()) -> list[dict]:
     ...
 ```
@@ -408,7 +408,7 @@ Then tag tools with the capability they require:
 
 ```python
 @mcp.tool
-@zed_mcp_tool(resource_type="mcp/capability", action="use", id_arg="_capability")
+@rebac_mcp_tool(resource_type="mcp/capability", action="use", id_arg="_capability")
 async def query_posts(query: str, ctx: Context = CurrentContext(), *, _capability: str = "blog.read") -> list[dict]:
     ...
 ```
@@ -426,8 +426,8 @@ These types are NOT shipped by `django-zed-rebac`. They live in a separate `agen
 A typical `agents/permissions.py` ships:
 
 ```python
-# agents/permissions.py — in YOUR agents app, not in zed_rebac
-from zed_rebac import schema as s
+# agents/permissions.py — in YOUR agents app, not in rebac
+from rebac import schema as s
 
 s.definition("agents/agent", relations=[
     s.relation("operator",       to="auth/user"),
@@ -451,7 +451,7 @@ A `Grant` row encodes "user U has delegated to agent A". Both relations must be 
 Add `agents/grant#active` to the type union of any relation that should accept agent invocation:
 
 ```python
-class Post(ZedRBACMixin, models.Model):
+class Post(RebacMixin, models.Model):
     class Meta:
         permission_relations = [
             s.relation("owner",  to="auth/user"),
@@ -479,7 +479,7 @@ s.definition("blog/post_capability", relations=[
     s.relation("write_capability", to="auth/capability"),
 ])
 
-class Post(ZedRBACMixin, models.Model):
+class Post(RebacMixin, models.Model):
     class Meta:
         permission_relations = [
             s.relation("owner",  to="auth/user"),
@@ -546,7 +546,7 @@ Post.objects.as_agent(agent, on_behalf_of=request.user)
 Post.objects.with_actor(SubjectRef(ObjectRef("agents/grant", grant.public_id)))
 Post.objects.with_actor(SubjectRef(ObjectRef("auth/apikey", apikey.public_id)))
 
-# Anything @zed_subject-decorated also resolves automatically:
+# Anything @rebac_subject-decorated also resolves automatically:
 Post.objects.with_actor(my_apikey_instance)
 ```
 
@@ -554,9 +554,9 @@ Inside an MCP tool (where the canonical actor is an `agents/grant`), use `as_age
 
 ```python
 @mcp.tool
-@zed_mcp_tool(resource_type="blog/post", action="write", id_arg="post_id")
+@rebac_mcp_tool(resource_type="blog/post", action="write", id_arg="post_id")
 async def edit_post(post_id: str, body: str, ctx: Context = CurrentContext()) -> dict:
-    user, agent = ctx.zed.user, ctx.zed.agent     # populated by zed_mcp_tool
+    user, agent = ctx.rebac.user, ctx.rebac.agent     # populated by rebac_mcp_tool
     post = await Post.objects.as_agent(agent, on_behalf_of=user).aget(public_id=post_id)
     post.body = body
     await post.asave()                            # re-checks `write` against the same agents/grant
@@ -580,7 +580,7 @@ s.definition("celery/task/reindex_posts", relations=[
 ])
 
 # In the task:
-from zed_rebac import backend, ObjectRef, current_actor
+from rebac import backend, ObjectRef, current_actor
 
 @shared_task
 def reindex_posts():
@@ -600,7 +600,7 @@ def reindex_posts():
 Or with the `@require_permission` decorator:
 
 ```python
-from zed_rebac import require_permission
+from rebac import require_permission
 
 @shared_task
 @require_permission(
@@ -614,22 +614,22 @@ def reindex_posts():
 
 ### DRF viewsets (permissions are inherited from the model)
 
-DRF integration requires NO additional schema authoring. The model's `permission_relations` are the source of truth; `ZedPermission` and `ZedFilterBackend` consult them.
+DRF integration requires NO additional schema authoring. The model's `permission_relations` are the source of truth; `RebacPermission` and `RebacFilterBackend` consult them.
 
 ```python
 class PostViewSet(viewsets.ModelViewSet):
     queryset           = Post.objects.all()
     serializer_class   = PostSerializer
-    permission_classes = [ZedPermission]
-    filter_backends    = [ZedFilterBackend]
+    permission_classes = [RebacPermission]
+    filter_backends    = [RebacFilterBackend]
 ```
 
 `list` → checks `read` per row. `retrieve` → `read`. `create` → `create` (model-level). `update`/`partial_update` → `write`. `destroy` → `delete`. Customise via `view.action_map` if your schema uses different action names:
 
 ```python
 class PostViewSet(viewsets.ModelViewSet):
-    permission_classes = [type("MyPerm", (ZedPermission,), {
-        "action_map": {**ZedPermission.action_map, "publish": "publish"},
+    permission_classes = [type("MyPerm", (RebacPermission,), {
+        "action_map": {**RebacPermission.action_map, "publish": "publish"},
     })]
 ```
 
@@ -648,17 +648,17 @@ class PostViewSet(viewsets.ModelViewSet):
 
 ### Plain Python entities
 
-Anything with a stable string ID can be a resource. Use the `@zed_resource` decorator to register the type:
+Anything with a stable string ID can be a resource. Use the `@rebac_resource` decorator to register the type:
 
 ```python
-from zed_rebac import zed_resource, schema as s
+from rebac import rebac_resource, schema as s
 
 s.definition("storage/s3_prefix", relations=[
     s.relation("reader", to="auth/user"),
     s.permission("read",  expr="reader"),
 ])
 
-@zed_resource(type="storage/s3_prefix", id_attr="prefix")
+@rebac_resource(type="storage/s3_prefix", id_attr="prefix")
 class S3Prefix:
     def __init__(self, prefix: str):
         self.prefix = prefix
@@ -667,7 +667,7 @@ class S3Prefix:
 Now any code can check:
 
 ```python
-from zed_rebac import backend, to_object_ref, to_subject_ref
+from rebac import backend, to_object_ref, to_subject_ref
 
 prefix = S3Prefix("uploads/2026/")
 result = backend().check_permission(
@@ -681,11 +681,11 @@ This makes REBAC available for any resource boundary your project has, not just 
 
 ### Multi-tenant scoping (soft tenants)
 
-For projects where one Django DB serves multiple tenants, use `ZED_REBAC_TYPE_PREFIX`:
+For projects where one Django DB serves multiple tenants, use `REBAC_TYPE_PREFIX`:
 
 ```python
 # settings.py — set per-tenant before request handling
-ZED_REBAC_TYPE_PREFIX = "tenant_acme/"
+REBAC_TYPE_PREFIX = "tenant_acme/"
 ```
 
 Every resource type emitted by the schema becomes `tenant_acme/blog/post`. Relationships from one tenant cannot be referenced by another.
@@ -696,11 +696,11 @@ For hard-tenant isolation (separate databases, schemas), use `django-tenants` an
 
 ## Composing schemas across packages
 
-`django-zed_rebac`'s build walks every installed app and collects:
+`django-zed-rebac`'s build walks every installed app and collects:
 
-1. Every `Meta.permission_relations` from `ZedRBACMixin` models.
+1. Every `Meta.permission_relations` from `RebacMixin` models.
 2. Every top-level `s.definition(...)` / `s.caveat(...)` in any app's `permissions.py`.
-3. Every `@zed_resource(...)` registration.
+3. Every `@rebac_resource(...)` registration.
 
 It composes them by **alphabetical order of resource type** (deterministic), validates references (every type mentioned must be defined), and emits one unified `schema.zed`.
 
@@ -708,7 +708,7 @@ It composes them by **alphabetical order of resource type** (deterministic), val
 
 ```python
 # In blog/models.py — references storage/folder declared in storage/permissions.py
-class Post(ZedRBACMixin, models.Model):
+class Post(RebacMixin, models.Model):
     folder = models.ForeignKey("storage.Folder", on_delete=models.CASCADE)
 
     class Meta:
@@ -798,7 +798,7 @@ post_perms = [
 # blog/models.py — clean
 from .permissions import post_perms
 
-class Post(ZedRBACMixin, models.Model):
+class Post(RebacMixin, models.Model):
     class Meta:
         permission_relations = post_perms
 ```
@@ -822,7 +822,7 @@ Each section below is a complete, working schema fragment. Copy and adapt.
 ### Pattern A — RBAC (role-based access control) on a model
 
 ```python
-class Document(ZedRBACMixin, models.Model):
+class Document(RebacMixin, models.Model):
     class Meta:
         permission_relations = [
             s.relation("admin",  to="auth/user"),
@@ -838,7 +838,7 @@ class Document(ZedRBACMixin, models.Model):
 ### Pattern B — Hierarchical resources (folders → docs)
 
 ```python
-class Folder(ZedRBACMixin, models.Model):
+class Folder(RebacMixin, models.Model):
     parent = models.ForeignKey("self", null=True, on_delete=models.CASCADE)
     class Meta:
         permission_relations = [
@@ -849,7 +849,7 @@ class Folder(ZedRBACMixin, models.Model):
         ]
 
 
-class Document(ZedRBACMixin, models.Model):
+class Document(RebacMixin, models.Model):
     folder = models.ForeignKey(Folder, on_delete=models.CASCADE)
     class Meta:
         permission_relations = [
@@ -863,7 +863,7 @@ class Document(ZedRBACMixin, models.Model):
 ### Pattern C — Ownership + group sharing
 
 ```python
-class Post(ZedRBACMixin, models.Model):
+class Post(RebacMixin, models.Model):
     class Meta:
         permission_relations = [
             s.relation("owner",          to="auth/user"),
@@ -877,7 +877,7 @@ class Post(ZedRBACMixin, models.Model):
 ### Pattern D — Public-readable, group-writable
 
 ```python
-class Page(ZedRBACMixin, models.Model):
+class Page(RebacMixin, models.Model):
     class Meta:
         permission_relations = [
             s.relation("editor",        to="auth/user"),
@@ -894,7 +894,7 @@ class Page(ZedRBACMixin, models.Model):
 # permissions.py
 s.directive("use expiration")
 
-class Doc(ZedRBACMixin, models.Model):
+class Doc(RebacMixin, models.Model):
     class Meta:
         permission_relations = [
             s.relation("owner",            to="auth/user"),
@@ -914,7 +914,7 @@ s.caveat(
     expression  = "user_tenant == doc_tenant",
 )
 
-class Doc(ZedRBACMixin, models.Model):
+class Doc(RebacMixin, models.Model):
     class Meta:
         permission_relations = [
             s.relation("viewer", to="auth/user", with_caveat="tenant_match"),
@@ -925,7 +925,7 @@ class Doc(ZedRBACMixin, models.Model):
 ### Pattern G — Agent acting on behalf of user (Grant pattern)
 
 ```python
-class Doc(ZedRBACMixin, models.Model):
+class Doc(RebacMixin, models.Model):
     class Meta:
         permission_relations = [
             s.relation("owner",  to="auth/user"),
@@ -951,7 +951,7 @@ s.definition("mcp/capability", relations=[
 
 # mcp/tools.py
 @mcp.tool
-@zed_mcp_tool(resource_type="mcp/capability", action="use", id_arg="_capability")
+@rebac_mcp_tool(resource_type="mcp/capability", action="use", id_arg="_capability")
 async def search_documents(q: str, ctx: Context = CurrentContext(), *, _capability: str = "docs.search"):
     ...
 ```
@@ -986,7 +986,7 @@ s.definition("storage/s3_prefix", relations=[
 ])
 
 # storage.py
-@zed_resource(type="storage/s3_prefix", id_attr="prefix")
+@rebac_resource(type="storage/s3_prefix", id_attr="prefix")
 class S3Prefix:
     def __init__(self, prefix: str):
         self.prefix = prefix
@@ -996,7 +996,7 @@ class S3Prefix:
 
 ## Reference — the schema-language complete grammar
 
-For the full SpiceDB schema language (composable schemas, all directives, every operator), see the [authzed documentation](https://authzed.com/docs/spicedb/concepts/schema). `django-zed_rebac`'s Python builder covers the SpiceDB-canonical subset relevant to Django projects:
+For the full SpiceDB schema language (composable schemas, all directives, every operator), see the [authzed documentation](https://authzed.com/docs/spicedb/concepts/schema). `django-zed-rebac`'s Python builder covers the SpiceDB-canonical subset relevant to Django projects:
 
 - Definitions (top-level, model-level, mcp-tool-level, celery-level)
 - Relations with type unions and subject sets

@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import pytest
 
-from zed_rebac import (
+from rebac import (
     CheckResult,
     ObjectRef,
     PermissionResult,

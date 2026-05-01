@@ -27,11 +27,11 @@ django-zed-rebac/
 │   ├── SPEC.md               # Implementation specification
 │   └── ZED.md                # Schema-authoring guide
 ├── pyproject.toml
-├── src/zed_rebac/            # Python module — see § Naming below
+├── src/rebac/            # Python module — see § Naming below
 └── tests/
 ```
 
-The Python module is **`zed_rebac`** (Django convention: hyphens →
+The Python module is **`rebac`** (Django convention: hyphens →
 underscores; matches `django-rest-framework` → `rest_framework`,
 `django-celery-beat` → `django_celery_beat`).
 
@@ -58,13 +58,13 @@ how design intent erodes.
 | Concept | Value |
 |---|---|
 | Pip distribution | `django-zed-rebac` |
-| Python module | `zed_rebac` |
-| Settings prefix | `ZED_REBAC_*` |
-| Management command | `manage.py zed_rebac <subcommand>` |
-| System-check IDs | `zed_rebac.E001` … `zed_rebac.W101` |
-| Schema header comments | `// @zed_package`, `// @zed_package_version`, `// @zed_schema_revision` |
-| App label | `zed_rebac` |
-| Public Python imports | `from zed_rebac import ...` |
+| Python module | `rebac` |
+| Settings prefix | `REBAC_*` |
+| Management command | `manage.py rebac <subcommand>` |
+| System-check IDs | `rebac.E001` … `rebac.W101` |
+| Schema header comments | `// @rebac_package`, `// @rebac_package_version`, `// @rebac_schema_revision` |
+| App label | `rebac` |
+| Public Python imports | `from rebac import ...` |
 
 These are stable. Don't propose alternatives without a spec PR first.
 
@@ -79,7 +79,7 @@ contract or the security-critical strict-by-default posture.
 
 The schema language, terminology (subjects / resources / relations /
 permissions / caveats / Zookies), and the `Backend` API surface mirror SpiceDB
-so that flipping `ZED_REBAC_BACKEND = "spicedb"` is a **configuration change,
+so that flipping `REBAC_BACKEND = "spicedb"` is a **configuration change,
 not a code change**.
 
 - **Don't** add `LocalBackend`-only conveniences that have no SpiceDB
@@ -112,11 +112,11 @@ A queryset that escapes its actor scope **must raise `MissingActorError`**,
 not silently return all rows. This is the django-scopes / django-tenants
 design that prevents the worst data-leakage bug class.
 
-- `ZED_REBAC_STRICT_MODE = True` is the production default.
+- `REBAC_STRICT_MODE = True` is the production default.
 - Bypass requires explicit `.sudo(reason="...")` or `with sudo(reason="..."):`.
   Both write a structured audit-log event.
 - Empty `sudo()` calls without `reason` raise when
-  `ZED_REBAC_REQUIRE_SUDO_REASON = True` (default).
+  `REBAC_REQUIRE_SUDO_REASON = True` (default).
 
 ### 4. Three-state `CheckResult`
 
@@ -130,7 +130,7 @@ to `bool` — that erases the layered-checks invariant.
 
 The generic verb is `.with_actor(actor)`, where `actor` is any `ActorLike`:
 a Django `User`, a registered `Agent`, an `agents/grant` `SubjectRef`, an
-`auth/apikey` `SubjectRef`, or anything `@zed_subject`-decorated. Two typed
+`auth/apikey` `SubjectRef`, or anything `@rebac_subject`-decorated. Two typed
 shorthands cover the common cases:
 
 - `.as_user(user)` — Django `User` shortcut (≡
@@ -203,7 +203,7 @@ over `Relationship` does not exclude them.
 
 ### 6. Determinism is load-bearing
 
-`python manage.py zed_rebac build-zed` must emit byte-identical
+`python manage.py rebac build-zed` must emit byte-identical
 `effective.zed` across runs / machines / Python versions / Django versions.
 
 - Sort definitions, relations, permissions, caveats — alphabetical by name.
@@ -224,7 +224,7 @@ parens are a footgun even when they parse.
 ### 8. Wildcards only on read-shaped permissions
 
 `auth/user:*` (or any `type:*` wildcard) **must not appear** in
-write/delete/create permissions. The schema doctor (`zed_rebac.W001`-class)
+write/delete/create permissions. The schema doctor (`rebac.W001`-class)
 emits a warning at build time when a wildcard relation feeds a non-read
 permission. Don't suppress the check; fix the schema.
 
@@ -241,7 +241,7 @@ and is the canonical anti-pattern.
 are NOT shipped by this plugin. They live in the consumer's apps. The
 plugin's auto-emitted base schema is limited to `auth/user` and `auth/group`
 (which map onto `django.contrib.auth`). When you reject a PR that adds an
-`agents/*` definition to `zed_rebac/permissions.py`, this is why.
+`agents/*` definition to `rebac/permissions.py`, this is why.
 
 ---
 
@@ -263,7 +263,7 @@ reverse**. The plugin is identity-agnostic by design — it knows nothing
 about a consumer's `User` model, request envelope, sqid IDs, or composition
 engine.
 
-The acceptable adapter point is `ZED_REBAC_ACTOR_RESOLVER` — a dotted-path
+The acceptable adapter point is `REBAC_ACTOR_RESOLVER` — a dotted-path
 setting that lets a downstream package supply a custom
 `request → SubjectRef` resolver. Standalone consumers use the default.
 
@@ -289,7 +289,7 @@ These belong in OTHER packages, never here:
 - **Not a policy DSL** like Polar or Cedar. The schema language is SpiceDB's
   `.zed`, REBAC-first. ABAC fragments go through caveats.
 - **Not a User permission UI.** Admins use Django admin or a downstream
-  package; the override-layer admin in `zed_rebac.admin` is bounded to
+  package; the override-layer admin in `rebac.admin` is bounded to
   surfacing the existing schema, not a generic policy editor.
 
 If a feature request blurs one of these lines, **the answer is "different
@@ -304,7 +304,7 @@ package, not here"**.
 Per `docs/SPEC.md § Testing`:
 
 - **Build:** `setuptools` via `pyproject.toml` (PEP 621). Source layout:
-  `src/zed_rebac/`.
+  `src/rebac/`.
 - **Lint:** `ruff` with line-length 100.
 - **Format:** `ruff format` (Black-compatible).
 - **Type-check:** `mypy --strict` AND `pyright` — both must pass on CI. Ship
@@ -322,12 +322,12 @@ Per `docs/SPEC.md § Testing`:
 Follow `docs/SPEC.md § AppConfig and system checks` exactly:
 
 ```python
-# zed_rebac/apps.py
-class ZedRebacConfig(AppConfig):
+# rebac/apps.py
+class RebacConfig(AppConfig):
     default_auto_field = "django.db.models.BigAutoField"
-    name              = "zed_rebac"
-    label             = "zed_rebac"
-    verbose_name      = "ZED-REBAC"
+    name              = "rebac"
+    label             = "rebac"
+    verbose_name      = "REBAC"
     default           = True
 
     def ready(self):
@@ -337,14 +337,14 @@ class ZedRebacConfig(AppConfig):
 
 **Two lines in `ready()`.** No queries. No model instantiation. No backend
 resolution at import time. Backend singleton is constructed lazily on first
-access via `zed_rebac.backend()`.
+access via `rebac.backend()`.
 
 ### Migrations
 
 - `Relationship` indexes ship in `0001_initial.py` — never as a
   documentation step.
 - Every `RunSQL` operation has `reverse_sql`.
-- Use `swapper` if `ZED_REBAC_RELATIONSHIP_MODEL` is genuinely swappable;
+- Use `swapper` if `REBAC_RELATIONSHIP_MODEL` is genuinely swappable;
   otherwise mark `class Meta: managed = True` (default) and ship the
   standard migration.
 - Migrations must run on PostgreSQL 13+, MySQL 8+, SQLite (test only). The
@@ -352,13 +352,13 @@ access via `zed_rebac.backend()`.
 
 ### Settings
 
-- All settings prefixed `ZED_REBAC_`. **No nested dict** (defeats
+- All settings prefixed `REBAC_`. **No nested dict** (defeats
   `SILENCED_SYSTEM_CHECKS`).
-- Read via `app_settings` object exposed by `zed_rebac.conf`.
+- Read via `app_settings` object exposed by `rebac.conf`.
 - Validation routed through Django's system checks framework (IDs
-  `zed_rebac.E001`, etc.). **Don't** raise at import time or in `ready()`.
+  `rebac.E001`, etc.). **Don't** raise at import time or in `ready()`.
 - Production-only checks (`--deploy`) for things like
-  `ZED_REBAC_SPICEDB_TLS = False`.
+  `REBAC_SPICEDB_TLS = False`.
 
 ### Public API surface
 
@@ -367,9 +367,9 @@ update; removing from it is a breaking change requiring a major bump.
 
 ```python
 # What's PUBLIC and semver-stable:
-from zed_rebac import (
-    ZedRBACMixin,
-    require_permission, zed_resource, zed_subject,
+from rebac import (
+    RebacMixin,
+    require_permission, rebac_resource, rebac_subject,
     Backend, LocalBackend, SpiceDBBackend, backend,
     CheckResult, Consistency, Zookie, PermissionResult,
     ObjectRef, SubjectRef, RelationshipTuple, ActorLike,
@@ -381,16 +381,16 @@ from zed_rebac import (
     write_relationships, delete_relationships,
     app_settings,
 )
-from zed_rebac.drf import ZedPermission, ZedFilterBackend
-from zed_rebac.celery import propagate_actor          # 0.3+
-from zed_rebac.mcp import zed_mcp_tool                # 0.6+
+from rebac.drf import RebacPermission, RebacFilterBackend
+from rebac.celery import propagate_actor          # 0.3+
+from rebac.mcp import rebac_mcp_tool                # 0.6+
 ```
 
-`with_actor` itself is a method on `ZedRBACManager` / `ZedRBACQuerySet`, not
+`with_actor` itself is a method on `RebacManager` / `RebacQuerySet`, not
 a top-level import. The top-level `actor_context(actor)` is the
 context-manager equivalent for non-queryset code paths.
 
-Anything under `zed_rebac._internal.*` is private and may break in any minor
+Anything under `rebac._internal.*` is private and may break in any minor
 release.
 
 ---
@@ -401,7 +401,7 @@ release.
 `AppRegistryNotReady`. Import inside `ready()` or inside the function that
 uses them.
 
-### Don't import ZedRBACMixin from `zed_rebac/__init__.py` eagerly
+### Don't import RebacMixin from `rebac/__init__.py` eagerly
 `__init__.py` is loaded during `INSTALLED_APPS` boot, before models can be
 defined. Use the lazy `__getattr__` shim already in place — eager top-level
 imports of model classes deadlock the apps registry.
@@ -430,8 +430,8 @@ written_at_xid)` are wire-compatible with `authzed.api.v1.Relationship`.
 
 ### Don't put non-Django keys into `class Meta:`
 Django's `Options` rejects unknown Meta attrs. The mixin uses a custom
-`ZedRBACModelBase` metaclass that strips `zed_resource_type` /
-`zed_default_action` from Meta before delegating to `ModelBase`, then
+`RebacModelBase` metaclass that strips `rebac_resource_type` /
+`rebac_default_action` from Meta before delegating to `ModelBase`, then
 restores them on `_meta` post-construction. Don't add new captured names
 without extending the metaclass.
 
@@ -439,11 +439,11 @@ without extending the metaclass.
 Single biggest CI hazard. Re-test determinism whenever you touch the emitter:
 
 ```bash
-python manage.py zed_rebac build-zed
-md5 zed-rebac/effective.zed > /tmp/h1
-rm zed-rebac/effective.zed
-python manage.py zed_rebac build-zed
-md5 zed-rebac/effective.zed > /tmp/h2
+python manage.py rebac build-zed
+md5 rebac/effective.zed > /tmp/h1
+rm rebac/effective.zed
+python manage.py rebac build-zed
+md5 rebac/effective.zed > /tmp/h2
 diff /tmp/h1 /tmp/h2 || echo "FAIL: non-deterministic"
 ```
 
@@ -461,7 +461,7 @@ that does is reserved for v1.x (post-stable). For now, use
 with the explicit queryset. The system check warns on bare-string
 `prefetch_related` against an RBAC model; treat it as a real warning. For
 defense-in-depth on Postgres, enable Row-Level Security at the database
-level using `ZED_REBAC_RLS_*` settings (post-1.0).
+level using `REBAC_RLS_*` settings (post-1.0).
 
 ---
 
@@ -482,7 +482,7 @@ When implementing or modifying the plugin:
    - `pyright src/`
    - `pytest` (all tests)
    - `pytest -m spicedb` (when Docker available)
-   - `python manage.py zed_rebac sync --check` (in the integration test
+   - `python manage.py rebac sync --check` (in the integration test
      project)
 5. **Determinism test on every emitter touch.** See
    [§ Don't ship a non-deterministic build](#dont-ship-a-non-deterministic-build).
