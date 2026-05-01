@@ -5,7 +5,7 @@ and Celery prerun hooks). It is read-only at call sites — `set_current_actor`
 should only be invoked at framework boundaries.
 
 Per-queryset actors take strict priority over the ContextVar. See
-SPEC.md § Three actor-resolution paths.
+ARCHITECTURE.md § Three actor-resolution paths.
 """
 from __future__ import annotations
 
@@ -102,13 +102,18 @@ def to_subject_ref(actor: ActorLike) -> SubjectRef:
     if isinstance(actor, SubjectRef):
         return actor
 
+    from ._id import subject_id_attr
+
     user_model = get_user_model()
     if isinstance(actor, user_model):
         # AnonymousUser hits a different branch below since AbstractBaseUser
         # is the parent class.
         if not getattr(actor, "is_authenticated", False):
             raise NoActorResolvedError("AnonymousUser cannot be a SubjectRef")
-        return SubjectRef.of(app_settings.REBAC_USER_TYPE, str(actor.pk))
+        attr = subject_id_attr(user_model)
+        return SubjectRef.of(
+            app_settings.REBAC_USER_TYPE, str(getattr(actor, attr))
+        )
 
     # Group?
     try:
@@ -116,7 +121,12 @@ def to_subject_ref(actor: ActorLike) -> SubjectRef:
     except ImportError:  # pragma: no cover
         Group = None  # type: ignore[assignment]
     if Group is not None and isinstance(actor, Group):
-        return SubjectRef.of(app_settings.REBAC_GROUP_TYPE, str(actor.pk), "member")
+        attr = subject_id_attr(Group)
+        return SubjectRef.of(
+            app_settings.REBAC_GROUP_TYPE,
+            str(getattr(actor, attr)),
+            "member",
+        )
 
     # @rebac_subject-registered?
     for cls, (type_, id_attr) in _subject_registry.items():

@@ -47,7 +47,7 @@ class SpiceDBBackend(Backend):
         # Real client wiring is deferred to v0.5.
         raise NotImplementedError(
             "SpiceDBBackend is not yet implemented in 0.1. "
-            "See SPEC.md § Roadmap — phase 0.5."
+            "See ARCHITECTURE.md § Roadmap — phase 0.5."
         )
 
     def check_access(

@@ -2,7 +2,7 @@
 
 Guidance for Claude Code working in the `django-zed-rebac` repository.
 
-> See `docs/SPEC.md` and `docs/ZED.md` for the design contract. Those docs are
+> See `docs/ARCHITECTURE.md` and `docs/ZED.md` for the design contract. Those docs are
 > the source of truth.
 
 ---
@@ -17,14 +17,14 @@ MCP / Celery / DRF / GraphQL adapters.
 
 **Status: pre-alpha.** Tier-1 source has landed (LocalBackend, mixin/manager,
 parser, sync command, system checks); SpiceDBBackend, caveat evaluation, and
-adapter modules are in flight per the SPEC.md roadmap. Layout:
+adapter modules are in flight per the ARCHITECTURE.md roadmap. Layout:
 
 ```
 django-zed-rebac/
 ├── README.md                 # Public pitch + quickstart + comparison
 ├── CLAUDE.md                 # This file
 ├── docs/
-│   ├── SPEC.md               # Implementation specification
+│   ├── ARCHITECTURE.md               # Implementation specification
 │   └── ZED.md                # Schema-authoring guide
 ├── pyproject.toml
 ├── src/rebac/            # Python module — see § Naming below
@@ -44,7 +44,7 @@ Read in this order before changing anything substantive:
 | Doc | Purpose | When to read |
 |---|---|---|
 | `README.md` | Public-facing pitch. What the package is, why use it, comparison to alternatives. | Always — it's the elevator pitch. |
-| `docs/SPEC.md` | Implementation specification. Architecture, public API, settings catalog, surface integrations (DRF/Celery/MCP/GraphQL), determinism, testing, roadmap. | Before adding any code, changing a public API, or touching settings/migrations. |
+| `docs/ARCHITECTURE.md` | Implementation specification. Architecture, public API, settings catalog, surface integrations (DRF/Celery/MCP/GraphQL), determinism, testing, roadmap. | Before adding any code, changing a public API, or touching settings/migrations. |
 | `docs/ZED.md` | User-facing schema authoring guide. Patterns library, anti-patterns, scenarios (users/groups, agents, MCP tools, Celery tasks). | Before changing the schema parser/builder, or documenting a new authoring scenario. |
 
 **If a behaviour isn't specified, propose a spec change first.** Don't
@@ -173,7 +173,7 @@ because `env` propagates through every traversal. We don't:
 - **Don't** add a "sudo flag propagates through `from_db`" shortcut.
   Transitive sudo is a contagion; cutting it at every relationship boundary
   forces each bypass to be greppable. See
-  [SPEC.md § Lessons from Odoo](./docs/SPEC.md).
+  [ARCHITECTURE.md § Lessons from Odoo](./docs/ARCHITECTURE.md).
 
 ### 5b. No implicit "owner from `created_by`"
 
@@ -301,7 +301,7 @@ package, not here"**.
 
 ### Tooling
 
-Per `docs/SPEC.md § Testing`:
+Per `docs/ARCHITECTURE.md § Testing`:
 
 - **Build:** `setuptools` via `pyproject.toml` (PEP 621). Source layout:
   `src/rebac/`.
@@ -319,7 +319,7 @@ Per `docs/SPEC.md § Testing`:
 
 ### AppConfig
 
-Follow `docs/SPEC.md § AppConfig and system checks` exactly:
+Follow `docs/ARCHITECTURE.md § AppConfig and system checks` exactly:
 
 ```python
 # rebac/apps.py
@@ -362,7 +362,7 @@ access via `rebac.backend()`.
 
 ### Public API surface
 
-Settled in `docs/SPEC.md § Public API surface`. Adding to it requires a spec
+Settled in `docs/ARCHITECTURE.md § Public API surface`. Adding to it requires a spec
 update; removing from it is a breaking change requiring a major bump.
 
 ```python
@@ -469,7 +469,7 @@ level using `REBAC_RLS_*` settings (post-1.0).
 
 When implementing or modifying the plugin:
 
-1. **Read the relevant spec section.** `docs/SPEC.md` for behaviour;
+1. **Read the relevant spec section.** `docs/ARCHITECTURE.md` for behaviour;
    `docs/ZED.md` for user-facing schema authoring.
 2. **One concern per PR.** A change that touches the manager AND the build
    emitter is two PRs.

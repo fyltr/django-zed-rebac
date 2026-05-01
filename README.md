@@ -4,7 +4,7 @@
 
 ---
 
-> **Status: pre-alpha.** The spec is settled and reviewed. Implementation is in progress; nothing is on PyPI yet. Track the milestones at [docs/SPEC.md § Roadmap](./docs/SPEC.md#roadmap).
+> **Status: pre-alpha.** The architecture is settled and reviewed; Tier-1 source has landed (`LocalBackend`, `RebacMixin`/manager, schema parser, `rebac sync` command, system checks). Caveat evaluation, `SpiceDBBackend`, and adapter modules are in flight. Nothing on PyPI yet. Track the milestones at [docs/ARCHITECTURE.md § Roadmap](./docs/ARCHITECTURE.md#roadmap).
 
 ---
 
@@ -92,7 +92,7 @@ That's the end-to-end flow. The same `Post.objects.with_actor(...)` pattern work
 
 | Doc | When to read it |
 |---|---|
-| **[docs/SPEC.md](./docs/SPEC.md)** | You're integrating, contributing, or evaluating fit. Architecture, public API, the three storage tiers, settings, surface integrations, determinism, testing, roadmap. |
+| **[docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md)** | You're integrating, contributing, or evaluating fit. Architecture, public API, the three storage tiers, settings, surface integrations, determinism, testing, roadmap. |
 | **[docs/ZED.md](./docs/ZED.md)** | You're writing permission schemas. How to define permissions for users, groups, MCP tools, AI agents (Grant pattern), Celery tasks, hierarchical resources, time-bound access, arbitrary Python entities. Patterns library and anti-patterns. |
 
 ## Why use this
@@ -108,7 +108,7 @@ That's the end-to-end flow. The same `Post.objects.with_actor(...)` pattern work
 
 ## Highlights
 
-- **Three storage tiers, three editors.** Tier 1 (structural, code-shipped `.zed`) → Tier 2 (override, admin-editable) → Tier 3 (relationships, runtime data). Clear ownership rule per tier — see [docs/SPEC.md § Conceptual model](./docs/SPEC.md#conceptual-model).
+- **Three storage tiers, three editors.** Tier 1 (structural, code-shipped `.zed`) → Tier 2 (override, admin-editable) → Tier 3 (relationships, runtime data). Clear ownership rule per tier — see [docs/ARCHITECTURE.md § Conceptual model](./docs/ARCHITECTURE.md#conceptual-model).
 - **Unified check API.** `check_access(op)` / `has_access(op)` / `accessible(op)` — one entrypoint family, borrowed from [Odoo 18's PR #179148](https://github.com/odoo/odoo/pull/179148) unification. No model-level vs record-level split at the call site.
 - **One mixin gates everything.** Add `RebacMixin` to a model, declare `Meta.rebac_resource_type`, and queries / writes / method calls / FK reverse accessors are all permission-aware. No per-viewset wiring.
 - **`with_actor(actor)` ≠ `sudo(reason=...)`.** Distinct verbs for distinct intents. `with_actor` re-evaluates checks as that subject (user, agent, grant, apikey, …); `sudo` bypasses them with mandatory `reason` and audit-log entry. Originating uid preserved through bypass for audit. Sudo does NOT propagate through relationship traversal — every related read re-resolves against the carrying scope.
@@ -169,20 +169,20 @@ Database support: PostgreSQL 13+ (production target), MySQL 8+ (supported), SQLi
 └──────────────────────────────────────────────────────────────────┘
 ```
 
-Both backends are line-for-line API-compatible. The migration path is well-defined: prove your schema in `LocalBackend` first, then flip `REBAC_BACKEND = "spicedb"` and point at a SpiceDB cluster when scale or graph depth demands it. Persisted consistency tokens (`Zookie`s) are not portable across the swap; this is the only operational consideration documented prominently in [SPEC.md § Migration safety](./docs/SPEC.md#migration-safety).
+Both backends are line-for-line API-compatible. The migration path is well-defined: prove your schema in `LocalBackend` first, then flip `REBAC_BACKEND = "spicedb"` and point at a SpiceDB cluster when scale or graph depth demands it. Persisted consistency tokens (`Zookie`s) are not portable across the swap; this is the only operational consideration documented prominently in [ARCHITECTURE.md § Migration safety](./docs/ARCHITECTURE.md#migration-safety).
 
 ## What `django-zed-rebac` is NOT
 
 - **Not a User model.** Use `django.contrib.auth.models.User` or any swappable `AUTH_USER_MODEL`.
 - **Not an authentication system.** Use `django-allauth`, `dj-rest-auth`, `simple-jwt`, or your own.
 - **Not a session manager.** Django's session middleware is fine.
-- **Not a multi-tenant database router.** Use `django-tenants` or `django-organizations`. `django-zed-rebac` is orthogonal — it works inside whatever tenant scope the project provides. (For soft tenancy in a single DB, see `REBAC_TYPE_PREFIX` in the spec.)
+- **Not a multi-tenant database router.** Use `django-tenants` or `django-organizations`. `django-zed-rebac` is orthogonal — it works inside whatever tenant scope the project provides. (For soft tenancy in a single DB, see `REBAC_TYPE_PREFIX` in [ARCHITECTURE.md](./docs/ARCHITECTURE.md).)
 - **Not a GraphQL admin layer.** A future `django-zed-rebac-admin` package may add one; v1 ships a Django admin form for `SchemaOverride`. Higher-level frameworks may layer their own admin surfaces on top.
 - **Not a policy DSL** like Polar or Cedar. The schema language is SpiceDB's `.zed`, REBAC-first. ABAC fragments are expressed via caveats.
 
 ## Status & roadmap
 
-This is a **pre-alpha** package. The architecture is settled (see [docs/SPEC.md](./docs/SPEC.md)) but no PyPI release exists yet. Milestones:
+This is a **pre-alpha** package. The architecture is settled (see [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md)) but no PyPI release exists yet. Milestones:
 
 - **0.1** — `LocalBackend` MVP, schema parser + sync command, `RebacMixin`, system checks, sync/check commands.
 - **0.2** — Caveats + expiration support.
@@ -192,11 +192,11 @@ This is a **pre-alpha** package. The architecture is settled (see [docs/SPEC.md]
 - **0.6** — MCP / GraphQL adapters.
 - **1.0** — Stable release with full docs and CI matrix green.
 
-Track the full plan in [docs/SPEC.md § Roadmap](./docs/SPEC.md#roadmap).
+Track the full plan in [docs/ARCHITECTURE.md § Roadmap](./docs/ARCHITECTURE.md#roadmap).
 
 ## Contributing
 
-Once the package lands on PyPI, contribution guidelines will live at `CONTRIBUTING.md`. For now, design feedback on the specs is welcome via GitHub issues — schema-language proposals, missing scenarios, integration-surface concerns, anything in [SPEC.md § Open questions](./docs/SPEC.md#open-questions) you'd push back on.
+Once the package lands on PyPI, contribution guidelines will live at `CONTRIBUTING.md`. For now, design feedback is welcome via GitHub issues — schema-language proposals, missing scenarios, integration-surface concerns, anything in [ARCHITECTURE.md § Open questions](./docs/ARCHITECTURE.md#open-questions) you'd push back on.
 
 ## License
 

@@ -16,7 +16,16 @@ from django.db.models.base import ModelBase
 from .managers import RebacManager
 
 
-_RECOGNISED_META = ("rebac_resource_type", "rebac_default_action")
+_RECOGNISED_META = (
+    "rebac_resource_type",
+    "rebac_default_action",
+    # Per-model override for the attribute the engine reads when
+    # building a resource_id (signals + manager) or a subject_id
+    # (``to_subject_ref`` for User / Group). Default resolution order
+    # is `Meta.rebac_id_attr` → `app_settings.REBAC_RESOURCE_ID_ATTR`
+    # → ``"pk"``. See `_id.resource_id_attr`.
+    "rebac_id_attr",
+)
 
 
 class RebacModelBase(ModelBase):

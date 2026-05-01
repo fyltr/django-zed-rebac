@@ -115,7 +115,7 @@ class Consistency(str, Enum):
 class Zookie:
     """Consistency token. Encodes `f"{backend_kind}.{xid}"`.
 
-    Tokens are NOT portable across backends — see SPEC.md § Migration safety.
+    Tokens are NOT portable across backends — see ARCHITECTURE.md § Migration safety.
     """
 
     backend: str

@@ -18,7 +18,7 @@ _DEFAULTS: dict[str, Any] = {
     "REBAC_SPICEDB_TOKEN": None,
     "REBAC_SPICEDB_TLS": True,
     "REBAC_SPICEDB_AUTO_WRITE_SCHEMA": True,
-    "REBAC_SCHEMA_DIR": None,  # resolves to BASE_DIR/zed-rebac at use site
+    "REBAC_SCHEMA_DIR": None,  # resolves to <cwd>/rebac at use site
     "REBAC_DEPTH_LIMIT": 8,
     "REBAC_DEFAULT_CONSISTENCY": "minimize_latency",
     "REBAC_CACHE_ALIAS": "default",
@@ -34,6 +34,15 @@ _DEFAULTS: dict[str, Any] = {
     "REBAC_SYNC_DJANGO_GROUPS": False,
     "REBAC_USER_TYPE": "auth/user",
     "REBAC_GROUP_TYPE": "auth/group",
+    # Where the engine sources resource ids when a model doesn't set
+    # ``Meta.rebac_id_attr``. ``"pk"`` is the historical default;
+    # consumers shipping public-id fields (sqid, public_id, slug) flip
+    # this globally without touching every model.
+    "REBAC_RESOURCE_ID_ATTR": "pk",
+    # Same idea for the actor side of ``to_subject_ref`` when the
+    # actor is a Django ``User`` / ``Group`` instance. Per-model
+    # ``Meta.rebac_id_attr`` still wins when set.
+    "REBAC_USER_ID_ATTR": "pk",
 }
 
 
@@ -53,7 +62,7 @@ class _AppSettings:
 
     def __getattr__(self, name: str) -> Any:
         if name not in _DEFAULTS:
-            raise AttributeError(f"Unknown ZED_REBAC setting: {name!r}")
+            raise AttributeError(f"Unknown REBAC setting: {name!r}")
         if name in self._cache:
             return self._cache[name]
         value = getattr(settings, name, _DEFAULTS[name])

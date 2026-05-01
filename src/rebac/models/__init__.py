@@ -1,7 +1,7 @@
 """Django models.
 
 Six tables: Relationship + Schema* (4) + PackageManagedRecord + SchemaOverride
-+ PermissionAuditEvent. Per SPEC.md § Models.
++ PermissionAuditEvent. Per ARCHITECTURE.md § Models.
 """
 from __future__ import annotations
 

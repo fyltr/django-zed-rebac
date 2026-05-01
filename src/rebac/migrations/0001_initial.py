@@ -38,20 +38,20 @@ class Migration(migrations.Migration):
         migrations.AddIndex(
             model_name="relationship",
             index=models.Index(
-                fields=["resource_type", "resource_id", "relation"], name="zr_rel_fwd_idx"
+                fields=["resource_type", "resource_id", "relation"], name="rebac_rel_fwd_idx"
             ),
         ),
         migrations.AddIndex(
             model_name="relationship",
             index=models.Index(
-                fields=["subject_type", "subject_id", "relation"], name="zr_rel_rev_idx"
+                fields=["subject_type", "subject_id", "relation"], name="rebac_rel_rev_idx"
             ),
         ),
         migrations.AddIndex(
             model_name="relationship",
             index=models.Index(
                 fields=["subject_type", "subject_id", "optional_subject_relation"],
-                name="zr_rel_subset_idx",
+                name="rebac_rel_subset_idx",
             ),
         ),
         migrations.AddConstraint(
@@ -147,7 +147,7 @@ class Migration(migrations.Migration):
         migrations.AddIndex(
             model_name="packagemanagedrecord",
             index=models.Index(
-                fields=["target_ct", "target_pk"], name="zr_pmr_target_idx"
+                fields=["target_ct", "target_pk"], name="rebac_pmr_target_idx"
             ),
         ),
         migrations.CreateModel(
@@ -193,7 +193,7 @@ class Migration(migrations.Migration):
         migrations.AddIndex(
             model_name="schemaoverride",
             index=models.Index(
-                fields=["target_ct", "target_pk"], name="zr_ovr_target_idx"
+                fields=["target_ct", "target_pk"], name="rebac_ovr_target_idx"
             ),
         ),
         migrations.CreateModel(

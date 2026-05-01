@@ -1,4 +1,4 @@
-"""Backend ABC. All backends present this surface — see SPEC.md § Unified check API."""
+"""Backend ABC. All backends present this surface — see ARCHITECTURE.md § Unified check API."""
 from __future__ import annotations
 
 from abc import ABC, abstractmethod

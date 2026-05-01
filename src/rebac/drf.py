@@ -61,8 +61,8 @@ if _HAS_DRF:
             if subject is None:
                 return False
 
-            rebac_type = getattr(getattr(view, "queryset", None), "model", None)
-            rebac_type = getattr(getattr(rebac_type, "_meta", None), "rebac_resource_type", None)
+            model_cls = getattr(getattr(view, "queryset", None), "model", None)
+            rebac_type = getattr(getattr(model_cls, "_meta", None), "rebac_resource_type", None)
             if not rebac_type:
                 return True
 

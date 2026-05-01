@@ -1,6 +1,6 @@
 """RebacManager + RebacQuerySet.
 
-Per SPEC.md § Three actor-resolution paths:
+Per ARCHITECTURE.md § Three actor-resolution paths:
   1. Per-queryset actor (.with_actor) — strictly highest priority
   2. Per-queryset sudo (.sudo) — bypass; logs an audit event
   3. current_actor() ContextVar — populated by middleware / Celery hooks
@@ -15,6 +15,7 @@ from typing import Any, Iterable
 
 from django.db import models
 
+from ._id import resource_id_attr
 from .actors import current_actor as _current_actor
 from .actors import grant_subject_ref, to_subject_ref
 from .actors import is_sudo as _is_sudo_ambient
@@ -117,11 +118,14 @@ class RebacQuerySet(models.QuerySet):
     _rebac_scope_applied: bool = False
 
     def _apply_scope_in_place(self) -> None:
-        """Inject `pk__in=<accessible>` directly onto the query's WHERE clause.
+        """Inject ``<id_attr>__in=<accessible>`` onto the query's WHERE clause.
 
-        Avoids `self.filter(...)` because `.get()` pre-slices the queryset
-        and `.filter()` rejects post-slice. `Q.add_q` operates at the SQL
-        level and bypasses the slice check.
+        ``id_attr`` defaults to ``"pk"`` but can be flipped per-model via
+        ``Meta.rebac_id_attr`` or globally via ``REBAC_RESOURCE_ID_ATTR``.
+
+        Avoids ``self.filter(...)`` because ``.get()`` pre-slices the
+        queryset and ``.filter()`` rejects post-slice. ``Q.add_q``
+        operates at the SQL level and bypasses the slice check.
         """
         if self._rebac_scope_applied:
             return
@@ -143,25 +147,29 @@ class RebacQuerySet(models.QuerySet):
                 resource_type=rebac_type,
             )
         )
-        # Convert to integers where the model PK is integer-typed, otherwise
-        # leave as strings (sqid models, UUID PKs, etc.)
-        try:
-            pk_field = self.model._meta.pk
-            if pk_field is not None and pk_field.get_internal_type() in (
-                "AutoField",
-                "BigAutoField",
-                "IntegerField",
-                "BigIntegerField",
-                "SmallIntegerField",
-                "PositiveIntegerField",
-                "PositiveBigIntegerField",
-                "PositiveSmallIntegerField",
-            ):
-                ids = [int(i) for i in ids]
-        except (ValueError, TypeError):
-            pass
-        # `Q.add_q` works even on sliced queries.
-        self.query.add_q(Q(pk__in=ids))
+        attr = resource_id_attr(self.model)
+        if attr == "pk":
+            # Coerce to ints when the PK is integer-typed; leave as
+            # strings for UUID/Char PKs. Only relevant for the pk path
+            # — non-pk attrs (sqid, public_id, slug) are always
+            # string-valued and pass through unchanged.
+            try:
+                pk_field = self.model._meta.pk
+                if pk_field is not None and pk_field.get_internal_type() in (
+                    "AutoField",
+                    "BigAutoField",
+                    "IntegerField",
+                    "BigIntegerField",
+                    "SmallIntegerField",
+                    "PositiveIntegerField",
+                    "PositiveBigIntegerField",
+                    "PositiveSmallIntegerField",
+                ):
+                    ids = [int(i) for i in ids]
+            except (ValueError, TypeError):
+                pass
+        # ``Q.add_q`` works even on sliced queries.
+        self.query.add_q(Q(**{f"{attr}__in": ids}))
 
     def _clone(self, **kwargs: Any) -> "RebacQuerySet":  # type: ignore[override]
         clone = super()._clone(**kwargs)
@@ -220,14 +228,17 @@ class RebacQuerySet(models.QuerySet):
         from .backends import backend
 
         rebac_type = self.model._meta.rebac_resource_type  # type: ignore[attr-defined]
-        # Pre-fetch PKs in scope, intersect with allowed.
-        affected_pks = {str(pk) for pk in self.values_list("pk", flat=True)}
-        if not affected_pks:
+        attr = resource_id_attr(self.model)
+        # Pre-fetch ids in scope, intersect with allowed.
+        affected = {
+            str(v) for v in self.values_list(attr, flat=True)
+        }
+        if not affected:
             return
-        allowed_pks = set(
+        allowed = set(
             backend().accessible(subject=actor, action=action, resource_type=rebac_type)
         )
-        denied = affected_pks - allowed_pks
+        denied = affected - allowed
         if denied:
             sample = ", ".join(sorted(denied)[:5])
             raise PermissionDenied(

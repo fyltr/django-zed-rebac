@@ -8,6 +8,7 @@ from __future__ import annotations
 from typing import Optional
 
 from ..conf import app_settings
+from .auth import RebacBackend
 from .base import Backend
 from .local import LocalBackend
 from .spicedb import SpiceDBBackend
@@ -43,4 +44,4 @@ def reset_backend() -> None:
     _backend = None
 
 
-__all__ = ["Backend", "LocalBackend", "SpiceDBBackend", "backend", "reset_backend"]
+__all__ = ["Backend", "LocalBackend", "RebacBackend", "SpiceDBBackend", "backend", "reset_backend"]

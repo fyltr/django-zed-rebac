@@ -6,6 +6,7 @@ from typing import Any
 from django.db.models.signals import pre_delete, pre_save
 from django.dispatch import receiver
 
+from ._id import resource_id_attr
 from .actors import current_actor as _current_actor
 from .actors import is_sudo as _is_sudo
 from .conf import app_settings
@@ -41,7 +42,15 @@ def _rebac_pre_save(sender: type, instance: Any, raw: bool = False, using: Any =
     action = "create" if is_create else "write"
 
     from .backends import backend
-    resource = ObjectRef(rebac_type, "" if is_create else str(instance.pk))
+    # Empty resource_id on create — even when the configured attr is
+    # something like ``sqid`` (a virtual field computed from PK), the
+    # value isn't computable until after the insert. Same sentinel as
+    # the pk-default path.
+    if is_create:
+        resource_id = ""
+    else:
+        resource_id = str(getattr(instance, resource_id_attr(sender)))
+    resource = ObjectRef(rebac_type, resource_id)
     result = backend().check_access(subject=actor, action=action, resource=resource)
     if not result.allowed:
         raise PermissionDenied(
@@ -68,7 +77,8 @@ def _rebac_pre_delete(sender: type, instance: Any, using: Any = None, **_: Any) 
         return
 
     from .backends import backend
-    resource = ObjectRef(rebac_type, str(instance.pk))
+    resource_id = str(getattr(instance, resource_id_attr(sender)))
+    resource = ObjectRef(rebac_type, resource_id)
     result = backend().check_access(subject=actor, action="delete", resource=resource)
     if not result.allowed:
         raise PermissionDenied(f"Denied: {actor} cannot delete {resource}")

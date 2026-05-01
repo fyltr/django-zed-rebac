@@ -27,17 +27,17 @@ class Relationship(models.Model):
             # Forward: "what subjects have <relation> on <resource>?"
             models.Index(
                 fields=["resource_type", "resource_id", "relation"],
-                name="zr_rel_fwd_idx",
+                name="rebac_rel_fwd_idx",
             ),
             # Reverse: "what resources does <subject> have <relation> on?"
             models.Index(
                 fields=["subject_type", "subject_id", "relation"],
-                name="zr_rel_rev_idx",
+                name="rebac_rel_rev_idx",
             ),
             # Subject-set traversal (group#member -> user)
             models.Index(
                 fields=["subject_type", "subject_id", "optional_subject_relation"],
-                name="zr_rel_subset_idx",
+                name="rebac_rel_subset_idx",
             ),
         ]
         constraints = [

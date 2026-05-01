@@ -1,4 +1,4 @@
-# `django-zed-rebac` — Specification
+# `django-zed-rebac` — Architecture
 
 > Status: **draft for review** — first public spec; no code merged yet.
 > Last updated: 2026-05-01

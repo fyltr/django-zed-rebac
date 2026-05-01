@@ -1,6 +1,6 @@
 """django-zed-rebac — drop-in REBAC engine for Django.
 
-See docs/SPEC.md for the design contract. The Python module is `rebac`
+See docs/ARCHITECTURE.md for the design contract. The Python module is `rebac`
 (per the naming question in CLAUDE.md, choosing the lean `rebac` form
 that matches Django convention: hyphens → underscores).
 
