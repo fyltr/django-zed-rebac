@@ -63,13 +63,40 @@ A queryset that escapes its actor scope **must raise `MissingActorError`**, not 
 
 `Backend.check_permission()` returns one of `HAS_PERMISSION`, `NO_PERMISSION`, `CONDITIONAL_PERMISSION(missing=[...])` — **not a bare `bool`**. The `CONDITIONAL` state mirrors SpiceDB's behaviour when caveat context is partially supplied; callers may retry with additional context. Don't simplify to `bool` — that erases the layered-checks invariant.
 
-### 4. Actor sticks to queryset / instance (Odoo `with_user()` model)
+### 4. Actor sticks to queryset / instance (generalised Odoo `with_user()` model)
 
-When a queryset is created with `.as_user(u)`, every instance loaded from it carries `u` via `from_db()`. A subsequent `instance.save()` checks against `u`, regardless of what `current_actor()` says now.
+The primary, generic verb is `.with_actor(actor)` where `actor` is any `ActorLike` — a Django `User`, a registered `Agent`, an `auth/grant` `SubjectRef`, an `auth/apikey` `SubjectRef`, or anything `@zed_subject`-decorated. Two typed shorthands cover the common cases:
 
-- **Don't** mutate a `ContextVar` inside `as_user()`. The actor lives on the queryset instance.
+- `.as_user(user)` — Django `User` shortcut (≡ `with_actor(to_subject_ref(user))`).
+- `.as_agent(agent, on_behalf_of=user)` — agent acting via grant (≡ `with_actor(grant_subject_ref(agent, user))`).
+
+When a queryset is created with any of the above, every instance loaded from it carries the resolved `SubjectRef` via `from_db()`. A subsequent `instance.save()` checks against that same actor, regardless of what `current_actor()` says now.
+
+- **Don't** name a queryset method `as_user` and have the implementation be different from `with_actor(to_subject_ref(user))`. There is exactly one code path; the shorthands are sugar.
+- **Don't** mutate a `ContextVar` inside `with_actor()`. The actor lives on the queryset instance.
 - **Don't** re-resolve the actor on `save()` — that breaks the Celery / cron invariant where work continues under the original requester after their HTTP request ended.
 - **Do** copy the actor into instances via `from_db` and into chained queryset clones via `_clone()` overrides.
+- **Do** make per-queryset `.with_actor(...)` strictly higher-priority than `current_actor()` ContextVar. Ambient context never overrides explicit local scope.
+
+### 4a. Sudo does NOT propagate through relationship traversal
+
+The single largest deliberate divergence from Odoo's `env.su` semantics. In Odoo, `record.sudo().lines.user_id` reads BOTH `lines` AND `user_id` in sudo because `env` propagates through every traversal. We don't:
+
+- `instance.sudo(reason=...)` flips the bypass for *this instance only*. Any FK accessor / reverse-FK manager / M2M / chained queryset on it re-resolves the actor against the carrying scope (`current_actor()` or the queryset's pinned actor) — it does NOT inherit the sudo flag.
+- If you genuinely need related rows under sudo, the inner queryset must call `.sudo(reason="...")` again. The audit log records every bypass independently — that's the point.
+- **Don't** add a "sudo flag propagates through `from_db`" shortcut. Transitive sudo is a contagion; cutting it at every relationship boundary forces each bypass to be greppable. See [SPEC.md § Lessons from Odoo 19](./docs/SPEC.md#lessons-from-odoo-19--footguns-we-avoid).
+
+### 4b. No implicit "owner from `create_uid`"
+
+Odoo's `ir.rule` filters routinely use `('create_uid', '=', user.id)` to derive ownership from the audit column. We don't. Ownership is an explicit `Relationship` row (`<resource>#owner @ auth/user:<id>`) written by your `post_save` signal handler or application code. The `created_by` / `created_at` audit columns on your model are independent.
+
+- **Don't** add a "default owner = creator" path that derives ownership from a write column. Even if it seems convenient. Ownership must be transferable and revocable; conflating with audit makes both impossible without breaking audit.
+
+### 4c. Soft-deleted rows participate in permission checks
+
+Archived/inactive rows are visible to permission evaluation by default. Soft-delete is orthogonal to permission scope — an admin with `delete` on an archived resource needs to be able to un-archive it. If callers want to hide archived rows, they filter at the queryset level (`Post.objects.with_actor(u).filter(archived=False)`); the permission walk over `Relationship` does not exclude them.
+
+- **Don't** introduce an `active_test`-style toggle (Odoo's per-call footgun) that flips visibility from inside the permission layer. It's a top-level policy.
 
 ### 5. Determinism is load-bearing
 
@@ -207,20 +234,24 @@ Settled in `docs/SPEC.md § Public API surface`. Adding to it requires a spec up
 # What's PUBLIC and semver-stable:
 from zed_rebac import (
     ZedRBACMixin, ZedRBACManager, ZedRBACQuerySet,
-    require_permission, zed_resource,
+    require_permission, zed_resource, zed_subject,
     schema as s,
     Backend, LocalBackend, SpiceDBBackend,
     CheckResult, Consistency, Zookie,
-    ObjectRef, SubjectRef,
+    ObjectRef, SubjectRef, ActorLike,
     PermissionDenied, MissingActorError, CaveatUnsupportedError,
     PermissionDepthExceeded, NoActorResolvedError,
-    current_actor, set_current_actor, sudo, system_context,
+    current_actor, set_current_actor, actor_context,
+    sudo, system_context,
+    to_subject_ref, grant_subject_ref,
     app_settings,
 )
 from zed_rebac.drf import ZedPermission, ZedFilterBackend
 from zed_rebac.celery import propagate_actor
 from zed_rebac.mcp import zed_mcp_tool
 ```
+
+`with_actor` itself is a method on `ZedRBACManager` / `ZedRBACQuerySet`, not a top-level import. The top-level `actor_context(actor)` is the context-manager equivalent for non-queryset code paths.
 
 Anything under `zed_rebac._internal.*` is private and may break in any minor release.
 
@@ -261,7 +292,7 @@ Do this in CI, not just locally.
 If you add a feature only the `LocalBackend` can do (e.g. a Python lambda evaluator), it breaks the SpiceDB swap promise. The contract: every feature must compile to a valid `.zed` schema accepted by SpiceDB's `WriteSchema`.
 
 ### Don't reach for `select_related` on RBAC models in v1
-The plugin doesn't auto-scope SQL JOINs in v1 — the custom SQL compiler that does is reserved for v1.x (post-stable). For now, use `prefetch_related(Prefetch("rel", queryset=Related.objects.as_user(u)))` with the explicit queryset. The system check warns on bare-string `prefetch_related` against an RBAC model; treat it as a real warning.
+The plugin doesn't auto-scope SQL JOINs in v1 — the custom SQL compiler that does is reserved for v1.x (post-stable). For now, use `prefetch_related(Prefetch("rel", queryset=Related.objects.with_actor(actor)))` with the explicit queryset. The system check warns on bare-string `prefetch_related` against an RBAC model; treat it as a real warning.
 
 ---
 

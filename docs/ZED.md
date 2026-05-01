@@ -49,7 +49,7 @@ definition blog/post {
 }
 ```
 
-`Post.objects.as_user(request.user).all()` now returns only posts the user is the `owner` of. To grant access, write a relationship:
+`Post.objects.with_actor(request.user).all()` now returns only posts the user is the `owner` of. (`with_actor()` is the generic verb; `Post.objects.as_user(request.user)` is the typed shorthand for the Django-User case — same result.) To grant access, write a relationship:
 
 ```python
 from zedrbac import backend, ObjectRef, SubjectRef, RelationshipTuple
@@ -518,6 +518,46 @@ backend().write_relationships([
 ```
 
 When the agent invokes a tool, the request passes `now` and `model_kind` in caveat context — the grant only resolves `active` if both context-side checks pass.
+
+#### Querying as an agent — `with_actor` is the generic verb
+
+The queryset-scoping verb is `with_actor(actor)`, where `actor` is any subject — Django `User`, registered `Agent`, `auth/grant` reference, `auth/apikey`, etc. Two typed shorthands handle the common cases:
+
+```python
+# Common case: HTTP request from a Django user
+Post.objects.as_user(request.user)
+# expands to: Post.objects.with_actor(to_subject_ref(request.user))
+#                       → SubjectRef(auth/user:<id>)
+
+# Agent acting on behalf of a user (the canonical Grant pattern)
+Post.objects.as_agent(agent, on_behalf_of=request.user)
+# expands to: Post.objects.with_actor(grant_subject_ref(agent, request.user))
+#                       → SubjectRef(auth/grant:<grant_id>#valid)
+
+# Or pass any SubjectRef directly:
+Post.objects.with_actor(SubjectRef(ObjectRef("auth/grant", grant.public_id)))
+Post.objects.with_actor(SubjectRef(ObjectRef("auth/apikey", apikey.public_id)))
+
+# Anything @zed_subject-decorated also resolves automatically:
+Post.objects.with_actor(my_service_account_instance)
+```
+
+Inside an MCP tool (where the canonical actor is an `auth/grant`), use `as_agent`:
+
+```python
+@mcp.tool
+@zed_mcp_tool(resource_type="blog/post", action="write", id_arg="post_id")
+async def edit_post(post_id: str, body: str, ctx: Context = CurrentContext()) -> dict:
+    user, agent = ctx.zed.user, ctx.zed.agent     # populated by zed_mcp_tool
+    post = await Post.objects.as_agent(agent, on_behalf_of=user).aget(public_id=post_id)
+    post.body = body
+    await post.asave()                            # re-checks `write` against the same auth/grant
+    return {"ok": True}
+```
+
+The grant subject's permission walk is the structural intersection of (a) the user's grants on `blog/post` and (b) the agent's declared capabilities — enforced by the schema graph (see [§ Targeting resources from grants](#targeting-resources-from-grants) above), not by app-layer ANDs. The agent inherits the user's view; can never exceed it.
+
+`with_actor` does NOT mutate `current_actor()` — the originating actor (typically the request's Django user) is preserved for audit. This is the Odoo `with_user` / `env.user` independence, made explicit. See [SPEC.md § `with_actor` vs `sudo`](./SPEC.md#with_actor-vs-sudo--distinct-verbs).
 
 ### Celery tasks acting on behalf of users
 
