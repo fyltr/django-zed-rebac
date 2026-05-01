@@ -17,7 +17,7 @@ Two backends are interchangeable behind one Python API:
 - **`LocalBackend`** — pure Django, evaluates permissions via recursive CTEs against a single `Relationship` table. Zero external infrastructure. Suitable up to ~10M relationships and depth ≤ 8.
 - **`SpiceDBBackend`** — wraps the official [`authzed`](https://pypi.org/project/authzed/) Python client. Connects to a SpiceDB cluster. Drop-in swap when `LocalBackend` is no longer enough — same Python API, no code changes, just `ZED_REBAC_BACKEND = "spicedb"` in settings.
 
-Add the mixin to your model and `Post.objects.all()` returns only what the user can read. Add `Model.objects.with_actor(actor)` for explicit actor scoping in MCP servers, Celery tasks, GraphQL resolvers, and management commands — `actor` can be a Django `User`, a registered `Agent`, an `auth/grant` (agent-acting-on-behalf-of-user), or anything `@zed_subject`-registered. Typed shorthands `as_user(user)` and `as_agent(agent, on_behalf_of=user)` cover the common cases.
+Add the mixin to your model and `Post.objects.all()` returns only what the user can read. Add `Model.objects.with_actor(actor)` for explicit actor scoping in MCP servers, Celery tasks, GraphQL resolvers, and management commands — `actor` can be a Django `User`, a registered `Agent`, an `agents/grant` (agent-acting-on-behalf-of-user, shipped by your `agents` app), or anything `@zed_subject`-registered. Typed shorthands `as_user(user)` and `as_agent(agent, on_behalf_of=user)` cover the common cases. The plugin itself only ships `auth/user` and `auth/group` schema (mapped onto `django.contrib.auth`); `agents/agent`, `agents/grant`, `auth/apikey`, and other subject types live in your own apps.
 
 ## Quickstart
 
@@ -27,12 +27,12 @@ INSTALLED_APPS = [
     "django.contrib.auth",
     "django.contrib.contenttypes",
     # ...
-    "zedrbac",
+    "zed_rebac",
     "blog",
 ]
 
 AUTHENTICATION_BACKENDS = [
-    "zedrbac.backends.ZedRBACBackend",
+    "zed_rebac.backends.ZedRBACBackend",
     "django.contrib.auth.backends.ModelBackend",
 ]
 
@@ -63,7 +63,7 @@ class BlogConfig(AppConfig):
 
 # blog/models.py
 from django.db import models
-from zedrbac import ZedRBACMixin
+from zed_rebac import ZedRBACMixin
 
 class Post(ZedRBACMixin, models.Model):
     title  = models.CharField(max_length=200)
@@ -76,7 +76,7 @@ class Post(ZedRBACMixin, models.Model):
 
 ```bash
 python manage.py migrate                  # creates Relationship + Schema* tables
-python manage.py zed-rebac sync           # loads permissions.zed into Schema* tables
+python manage.py zed_rebac sync           # loads permissions.zed into Schema* tables
 ```
 
 ```python
@@ -86,7 +86,7 @@ def post_detail(request, pk):
     return render(request, "post.html", {"post": post})
 ```
 
-That's the end-to-end flow. The same `Post.objects.with_actor(...)` pattern works in DRF viewsets, Celery tasks, MCP tools, and GraphQL resolvers — the actor can be a Django `User`, an `Agent`, an `auth/grant`, or any registered subject. Typed shorthands `as_user(request.user)` and `as_agent(agent, on_behalf_of=request.user)` cover the common cases.
+That's the end-to-end flow. The same `Post.objects.with_actor(...)` pattern works in DRF viewsets, Celery tasks, MCP tools, and GraphQL resolvers — the actor can be a Django `User`, an `Agent`, an `agents/grant`, or any registered subject. Typed shorthands `as_user(request.user)` and `as_agent(agent, on_behalf_of=request.user)` cover the common cases.
 
 ## Documentation
 
@@ -102,7 +102,7 @@ That's the end-to-end flow. The same `Post.objects.with_actor(...)` pattern work
 | Per-object permissions in Django | `django-guardian` (per-object ACL via GenericFK; no JOIN propagation; no graph traversal) | True REBAC graph; SpiceDB-compatible; manager-level queryset scoping; cross-relation propagation. |
 | Run SpiceDB-style permissions locally without infrastructure | None — SpiceDB itself is a Go binary that needs Postgres + a sidecar | `LocalBackend`: recursive CTE on a single Django table. Same API surface as `SpiceDBBackend`. |
 | AI-agent authorization | Cedar (no graph traversal); Casbin (in-memory post-filter); Polar/Oso (deprecated 2023) | Native Authzed Grant pattern: an agent acting on behalf of a user receives the *structural intersection* of the user's grants and the agent's declared capabilities — enforced by the schema graph, not by app-layer ANDs. |
-| Permission scoping outside HTTP | Manual `if user.has_perm(...)` everywhere | `Model.objects.with_actor(actor)` works in MCP servers, Celery tasks, cron, management commands, plain Python — anywhere. The actor is generic: Django `User`, `Agent`, `auth/grant`, `auth/apikey`, or any registered subject. |
+| Permission scoping outside HTTP | Manual `if user.has_perm(...)` everywhere | `Model.objects.with_actor(actor)` works in MCP servers, Celery tasks, cron, management commands, plain Python — anywhere. The actor is generic: Django `User`, `Agent`, `agents/grant`, `auth/apikey`, or any registered subject. |
 | Strict-by-default (no silent leaks) | `django-guardian` returns all rows when nothing scopes; easy to forget | Querysets without an actor raise `MissingActorError` rather than returning everything. Bypass requires explicit `.sudo(reason=...)` and is logged. |
 | Admin-editable policy with safe upgrades | `django-guardian` per-object ACL only; no rule overrides | Tier-2 `SchemaOverride` model: tighten / loosen / disable / extend a package-shipped baseline at runtime. `noupdate=True` semantics preserve admin edits across upgrades, mirroring Odoo's `ir.model.data`. |
 
@@ -119,7 +119,7 @@ That's the end-to-end flow. The same `Post.objects.with_actor(...)` pattern work
 - **Three-state checks.** Like SpiceDB, `check_access()` returns `HAS_PERMISSION`, `NO_PERMISSION`, or `CONDITIONAL_PERMISSION(missing=[...])` — the latter lists which caveat fields the caller must supply for a definitive answer.
 - **Type-checked.** Ships `py.typed`. `ZedRBACManager[M]` is `Generic[M]` — your IDE infers the right model class through the manager. `mypy --strict` and `pyright` both run on CI.
 - **`noupdate=True` upgrade safety.** Admin schema edits are preserved across package upgrades. Destructive overwrite is an explicit `--force-overwrite` flag, never an implicit side effect of install vs upgrade. Engineers Odoo's `-i` footgun out.
-- **Deterministic build.** `python manage.py zed-rebac sync --check` is a CI gate that returns non-zero on schema drift, mirroring `migrate --check`.
+- **Deterministic build.** `python manage.py zed_rebac sync --check` is a CI gate that returns non-zero on schema drift, mirroring `migrate --check`.
 
 ## Compatibility
 
@@ -155,7 +155,7 @@ Database support: PostgreSQL 13+ (production target), MySQL 8+ (supported), SQLi
 │   ZedRBACMixin / ZedPermission / @zed_resource / @zed_mcp_tool   │
 │                            │                                      │
 │            ┌───────────────▼──────────────────┐                  │
-│            │  zedrbac.backends.Backend (ABC)   │                  │
+│            │  zed_rebac.backends.Backend (ABC)   │                  │
 │            │   check_access  has_access        │                  │
 │            │   accessible    lookup_subjects   │                  │
 │            └───────────────┬──────────────────┘                  │
@@ -177,7 +177,7 @@ Both backends are line-for-line API-compatible. The migration path is well-defin
 - **Not an authentication system.** Use `django-allauth`, `dj-rest-auth`, `simple-jwt`, or your own.
 - **Not a session manager.** Django's session middleware is fine.
 - **Not a multi-tenant database router.** Use `django-tenants` or `django-organizations`. `django-zed-rebac` is orthogonal — it works inside whatever tenant scope the project provides. (For soft tenancy in a single DB, see `ZED_REBAC_TYPE_PREFIX` in the spec.)
-- **Not a GraphQL admin layer.** A future `django-zed-rebac-admin` package may add one; v1 ships a Django admin form for `SchemaOverride`. Higher-level frameworks (e.g. [Angee](https://github.com/apexive/django-angee)) layer their own admin surfaces on top.
+- **Not a GraphQL admin layer.** A future `django-zed-rebac-admin` package may add one; v1 ships a Django admin form for `SchemaOverride`. Higher-level frameworks may layer their own admin surfaces on top.
 - **Not a policy DSL** like Polar or Cedar. The schema language is SpiceDB's `.zed`, REBAC-first. ABAC fragments are expressed via caveats.
 
 ## Status & roadmap

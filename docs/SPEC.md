@@ -25,13 +25,15 @@ Core capabilities:
   - **Tier 2 — Override.** Admin-editable tweaks on top of the package baseline.
   - **Tier 3 — Relationship.** The actual edges in `Relationship` rows.
 - **One unified check API:** `check_access(op)` / `has_access(op)` / `accessible(op)` (borrowed from Odoo 18's PR #179148 unification). No model-level vs record-level split at the call site.
-- **`Model.objects.with_actor(actor)` / `instance.sudo(reason=...)`** — distinct verbs for distinct intents. The actor is any `SubjectRef` — a Django `User`, a registered `Agent`, an `auth/grant` (agent-acting-on-behalf-of-user), an `auth/apikey`, or any `@zed_subject`-registered object. `as_user(u)` and `as_agent(agent, on_behalf_of=u)` are typed shorthands. Mandatory `reason` on bypass, originating uid preserved through bypass for audit (Odoo `env.su` / `env.user` independence).
+- **`Model.objects.with_actor(actor)` / `instance.sudo(reason=...)`** — distinct verbs for distinct intents. The actor is any `SubjectRef` — a Django `User`, a registered `Agent`, an `agents/grant` (agent-acting-on-behalf-of-user), an `auth/apikey`, or any `@zed_subject`-registered object. `as_user(u)` and `as_agent(agent, on_behalf_of=u)` are typed shorthands. Mandatory `reason` on bypass, originating uid preserved through bypass for audit (Odoo `env.su` / `env.user` independence).
+
+Subject types named `auth/<x>` (`auth/user`, `auth/group`) are emitted by the plugin because they map onto `django.contrib.auth.User` / `Group`. Everything else — `auth/apikey`, `agents/agent`, `agents/grant`, custom service-account types, etc. — lives in the consumer's own apps (`auth/apikey` in your auth-extension app; `agents/agent` and `agents/grant` in an `agents` app you control). The plugin ships no `Agent` / `Grant` / `Service` schema fragment.
 - **Strict-by-default**: a queryset that escapes its actor scope raises `MissingActorError` rather than silently returning all rows.
 - **Designed-for-AI-agents**: the canonical Authzed *Grant* pattern is supported out of the box. The agent's effective permission on any resource is the structural intersection of (a) the user's grants, (b) the agent's declared capabilities — enforced by the schema graph, not by app-layer ANDs.
 
-What `django-zed-rebac` deliberately does **not** ship: a `User` model, auth providers, login UI, session handling, GraphQL admin endpoints. Those are orthogonal — use `django.contrib.auth` (default) or any of `django-allauth` / `dj-rest-auth` / your own. The Angee framework layers on top to provide the polymorphic Subject types, the GraphQL admin surface, and the Grant-pattern wiring; nothing in `django-zed-rebac` requires Angee.
+What `django-zed-rebac` deliberately does **not** ship: a `User` model, auth providers, login UI, session handling, GraphQL admin endpoints. Those are orthogonal — use `django.contrib.auth` (default) or any of `django-allauth` / `dj-rest-auth` / your own. Downstream frameworks may layer on top to provide polymorphic Subject types (`auth/apikey`, `agents/agent`, `agents/grant`, …), GraphQL admin surfaces, and Grant-pattern wiring; nothing here is coupled to any specific framework.
 
-For schema authoring, see [ZED.md](./ZED.md). For the broader Angee architecture this engine plugs into, see [`django-angee/docs/PERMISSIONS.md`](https://github.com/apexive/django-angee/blob/main/docs/PERMISSIONS.md).
+For schema authoring, see [ZED.md](./ZED.md).
 
 ---
 
@@ -51,11 +53,11 @@ INSTALLED_APPS = [
     "django.contrib.auth",
     "django.contrib.contenttypes",
     # ...
-    "zedrbac",
+    "zed_rebac",
 ]
 
 AUTHENTICATION_BACKENDS = [
-    "zedrbac.backends.ZedRBACBackend",
+    "zed_rebac.backends.ZedRBACBackend",
     "django.contrib.auth.backends.ModelBackend",
 ]
 
@@ -94,7 +96,7 @@ class BlogConfig(AppConfig):
 ```python
 # blog/models.py
 from django.db import models
-from zedrbac import ZedRBACMixin
+from zed_rebac import ZedRBACMixin
 
 class Post(ZedRBACMixin, models.Model):
     title  = models.CharField(max_length=200)
@@ -109,7 +111,7 @@ class Post(ZedRBACMixin, models.Model):
 
 ```bash
 python manage.py migrate                   # creates Relationship + Schema* tables
-python manage.py zed-rebac sync            # loads permissions.zed into Schema* tables
+python manage.py zed_rebac sync            # loads permissions.zed into Schema* tables
 ```
 
 ```python
@@ -136,7 +138,7 @@ The same flow works in DRF, Celery tasks, MCP tools, and management commands. Se
 
 | Concept | What it is | Example |
 |---|---|---|
-| **Subject** | Who is acting. A typed reference: `subject_type:subject_id`. | `auth/user:42`, `auth/agent:claude_v3` |
+| **Subject** | Who is acting. A typed reference: `subject_type:subject_id`. | `auth/user:42`, `agents/agent:claude_v3` |
 | **Resource** | What is being acted upon. A typed reference. | `blog/post:99` |
 | **Relation** | A typed link from a subject to a resource. Rows in the `Relationship` table. | `blog/post:99 #owner @ auth/user:42` |
 | **Permission** | A computed expression over relations. Never stored, always evaluated. | `permission read = owner + viewer` |
@@ -157,7 +159,7 @@ This three-state result mirrors SpiceDB exactly and is critical for layered chec
 │  Source: <app>/permissions.zed (code, in PR)                    │
 │  Store:  SchemaDefinition / SchemaRelation /                    │
 │          SchemaPermission / SchemaCaveat                        │
-│  Loader: manage.py zed-rebac sync                               │
+│  Loader: manage.py zed_rebac sync                               │
 │  Editor: engineers via PR (admins via Tier 2)                   │
 ├─ Tier 2: OVERRIDE ─────────────────────────────────────────────┤
 │  Source: admin actions (your app's admin UI)                    │
@@ -189,7 +191,7 @@ This three-state result mirrors SpiceDB exactly and is critical for layered chec
 │              ZedRBACMixin / ZedPermission / @zed_resource         │
 │                          │                                        │
 │  ┌───────────────────────▼────────────────────────────────┐      │
-│  │                 zedrbac.backends.Backend (ABC)           │     │
+│  │                 zed_rebac.backends.Backend (ABC)           │     │
 │  │   check_access  has_access  accessible  lookup_subjects  │     │
 │  └───────────────────────┬────────────────────────────────┘      │
 │                          │                                        │
@@ -224,7 +226,7 @@ This three-state result mirrors SpiceDB exactly and is critical for layered chec
 ## Public API surface
 
 ```python
-from zedrbac import (
+from zed_rebac import (
     # Mixin and managers
     ZedRBACMixin, ZedRBACManager, ZedRBACQuerySet,
 
@@ -253,13 +255,13 @@ from zedrbac import (
     app_settings,
 )
 
-from zedrbac.drf    import ZedPermission, ZedFilterBackend
-from zedrbac.celery import propagate_actor
-from zedrbac.mcp    import zed_mcp_tool
-from zedrbac.schema import parse_zed, validate_schema   # for tooling
+from zed_rebac.drf    import ZedPermission, ZedFilterBackend
+from zed_rebac.celery import propagate_actor
+from zed_rebac.mcp    import zed_mcp_tool
+from zed_rebac.schema import parse_zed, validate_schema   # for tooling
 ```
 
-Everything else (`zedrbac._internal.*`) is private and may change in any minor release.
+Everything else (`zed_rebac._internal.*`) is private and may change in any minor release.
 
 ---
 
@@ -270,7 +272,7 @@ Six tables ship with the plugin. The first is the core REBAC store; the next fou
 ### `Relationship` — Tier 3, the core REBAC store
 
 ```python
-# zedrbac/models/relationship.py (sketch)
+# zed_rebac/models/relationship.py (sketch)
 class Relationship(models.Model):
     resource_type             = models.CharField(max_length=64, db_index=True)
     resource_id               = models.CharField(max_length=64, db_index=True)
@@ -306,7 +308,7 @@ class Relationship(models.Model):
 
 **Frozen contract.** The shape mirrors `authzed.api.v1.Relationship` exactly. Renames are breaking. Indexes are critical (the recursive CTE walks them on every check) and ship in the initial migration — never as a documentation step.
 
-**Swappability.** Projects that need to extend the model (audit FKs, multi-tenant prefix, etc.) declare a custom subclass and point `ZED_REBAC_RELATIONSHIP_MODEL = "myapp.MyRelationship"`. The plugin uses [`swapper`](https://pypi.org/project/swapper/) to keep migrations correct across this swap. Default behaviour: `swapper` returns the built-in `zedrbac.Relationship`.
+**Swappability.** Projects that need to extend the model (audit FKs, multi-tenant prefix, etc.) declare a custom subclass and point `ZED_REBAC_RELATIONSHIP_MODEL = "myapp.MyRelationship"`. The plugin uses [`swapper`](https://pypi.org/project/swapper/) to keep migrations correct across this swap. Default behaviour: `swapper` returns the built-in `zed_rebac.Relationship`.
 
 **`written_at_xid` (Zookie equivalent).** Populated on save:
 - PostgreSQL: `txid_current()` via a default expression.
@@ -315,7 +317,7 @@ class Relationship(models.Model):
 
 `Zookie` consistency tokens encode `f"{backend_kind}.{xid}"`. Tokens are **not portable** across backends; if a project flips `ZED_REBAC_BACKEND` from `local` to `spicedb`, persisted Zookies in caches must be drained.
 
-**`expires_at`.** Mirrors SpiceDB's [`use expiration`](https://authzed.com/docs/spicedb/concepts/schema#use-expiration) feature (GA in v1.40+). Expired rows are evaluated as absent at check time; a periodic GC task (`zedrbac.gc.expire_relationships`) deletes them every 5 minutes by default.
+**`expires_at`.** Mirrors SpiceDB's [`use expiration`](https://authzed.com/docs/spicedb/concepts/schema#use-expiration) feature (GA in v1.40+). Expired rows are evaluated as absent at check time; a periodic GC task (`zed_rebac.gc.expire_relationships`) deletes them every 5 minutes by default.
 
 ### `SchemaDefinition` / `SchemaRelation` / `SchemaPermission` / `SchemaCaveat` — Tier 1 baseline
 
@@ -358,7 +360,7 @@ class SchemaCaveat(models.Model):
 ]
 ```
 
-These rows are **read-only** to application code. They're populated by `manage.py zed-rebac sync` and (for Tier 2 deltas) by `SchemaOverride` rows that mutate them indirectly.
+These rows are **read-only** to application code. They're populated by `manage.py zed_rebac sync` and (for Tier 2 deltas) by `SchemaOverride` rows that mutate them indirectly.
 
 ### `PackageManagedRecord` — Tier 1 provenance, the `noupdate` mechanism
 
@@ -416,7 +418,7 @@ effective_expr = (baseline_expr + extends) AND tightens
 
 Compiled once at app-ready into the in-memory expression tree; cached, invalidated on `SchemaOverride` writes via signal.
 
-`django-zed-rebac` ships a Django admin form for `SchemaOverride`. The Angee framework adds GraphQL CRUD on top.
+`django-zed-rebac` ships a Django admin form for `SchemaOverride`. Downstream frameworks may add GraphQL CRUD on top.
 
 ### `PermissionAuditEvent` — append-only audit
 
@@ -450,7 +452,7 @@ All settings prefixed `ZED_REBAC_`. No nested dict. Read via the public `app_set
 | Setting | Default | Type | Purpose |
 |---|---|---|---|
 | `ZED_REBAC_BACKEND` | `"local"` | `"local"` \| `"spicedb"` | Which backend to instantiate at app-ready. |
-| `ZED_REBAC_RELATIONSHIP_MODEL` | `"zedrbac.Relationship"` | `str` | Swappable relationship model (Django convention). |
+| `ZED_REBAC_RELATIONSHIP_MODEL` | `"zed_rebac.Relationship"` | `str` | Swappable relationship model (Django convention). |
 | `ZED_REBAC_SPICEDB_ENDPOINT` | `None` | `str` \| `None` | `host:port` for `authzed.api.v1.Client`. Required when backend is `spicedb`. |
 | `ZED_REBAC_SPICEDB_TOKEN` | `None` | `str` \| `None` | Preshared key. Required when backend is `spicedb`. |
 | `ZED_REBAC_SPICEDB_TLS` | `True` | `bool` | If `False`, uses `InsecureClient` (dev only). |
@@ -465,7 +467,7 @@ All settings prefixed `ZED_REBAC_`. No nested dict. Read via the public `app_set
 | `ZED_REBAC_REQUIRE_SUDO_REASON` | `True` | `bool` | If `True`, `sudo()` calls without a `reason=...` raise. |
 | `ZED_REBAC_ALLOW_SUDO` | `True` | `bool` | Globally disable `sudo()`. Strict tenants set `False`. |
 | `ZED_REBAC_GC_INTERVAL_SECONDS` | `300` | `int` | How often the expiration GC task runs. |
-| `ZED_REBAC_ACTOR_RESOLVER` | `"zedrbac.actors.default_resolver"` | `str` | Dotted-path callable that resolves `request → SubjectRef`. Override for custom identity layers (e.g., agent grants). |
+| `ZED_REBAC_ACTOR_RESOLVER` | `"zed_rebac.actors.default_resolver"` | `str` | Dotted-path callable that resolves `request → SubjectRef`. Override for custom identity layers (e.g., agent grants). |
 | `ZED_REBAC_TYPE_PREFIX` | `""` | `str` | Optional prefix for all generated resource types (multi-tenant SaaS). |
 | `ZED_REBAC_SUPERUSER_BYPASS` | `True` | `bool` | If `True`, `is_superuser=True` short-circuits `has_perm`. Strict tenants set `False`. |
 
@@ -480,7 +482,7 @@ Validation runs in the system-checks framework at every `manage.py` invocation. 
 ```python
 class ZedRBACConfig(AppConfig):
     default_auto_field = "django.db.models.BigAutoField"
-    name              = "zedrbac"
+    name              = "zed_rebac"
     verbose_name      = "ZED-REBAC"
     default           = True
 
@@ -489,9 +491,9 @@ class ZedRBACConfig(AppConfig):
         from . import checks     # noqa: F401  — registers system checks
 ```
 
-**No queries. No model instantiation. No backend resolution at import time.** The backend singleton is constructed lazily on first access via `zedrbac.backend()` — this avoids `AppRegistryNotReady` and keeps `migrate` fast.
+**No queries. No model instantiation. No backend resolution at import time.** The backend singleton is constructed lazily on first access via `zed_rebac.backend()` — this avoids `AppRegistryNotReady` and keeps `migrate` fast.
 
-System checks (in `zedrbac/checks.py`):
+System checks (in `zed_rebac/checks.py`):
 
 | ID | Severity | What it validates |
 |---|---|---|
@@ -500,7 +502,7 @@ System checks (in `zedrbac/checks.py`):
 | `zed_rebac.E003` | Error | A model with `Meta.zed_resource_type` references a type not declared in any loaded `permissions.zed`. |
 | `zed_rebac.E004` | Error | Permission expressions parse against operator grammar. |
 | `zed_rebac.E005` | Error | `permissions.zed` declared in an `AppConfig` cannot be located on disk. |
-| `zed_rebac.W001` | Warning | `zedrbac.backends.ZedRBACBackend` not in `AUTHENTICATION_BACKENDS`. |
+| `zed_rebac.W001` | Warning | `zed_rebac.backends.ZedRBACBackend` not in `AUTHENTICATION_BACKENDS`. |
 | `zed_rebac.W002` | Warning | A model with `Meta.zed_resource_type` is missing `ZedRBACMixin`. |
 | `zed_rebac.W003` | Warning | A `prefetch_related("rel")` string-form for an RBAC-flagged related model — should use explicit `Prefetch(...)`. |
 | `zed_rebac.W004` | Warning | A relation has zero `Relationship` rows after 30 days (potential dead schema). |
@@ -513,7 +515,7 @@ Users silence individual checks via Django's `SILENCED_SYSTEM_CHECKS = ["zed_reb
 ## Authorization backend
 
 ```python
-# zedrbac/backends.py
+# zed_rebac/backends.py
 class ZedRBACBackend:
     """
     Django auth backend. Routes per-object has_perm() through the REBAC engine.
@@ -546,7 +548,7 @@ class ZedRBACBackend:
         return False
 ```
 
-**Codename mapping.** Default mappings (`{view_, change_, delete_, add_}_<model>` → `{read, write, delete, create}`) ship in `zedrbac.codenames`. Per-package overrides via:
+**Codename mapping.** Default mappings (`{view_, change_, delete_, add_}_<model>` → `{read, write, delete, create}`) ship in `zed_rebac.codenames`. Per-package overrides via:
 
 ```python
 # yourapp/apps.py
@@ -629,12 +631,12 @@ The headline feature. By inclusion, every model operation is gated against the e
 
 ```python
 ActorLike = Union[SubjectRef, User, Group, "AnyZedSubject"]
-# Anything that can resolve to an auth/<type>:<id> SubjectRef:
+# Anything that can resolve to a <type>:<id> SubjectRef:
 #   - django.contrib.auth User instance       → auth/user:<id>
 #   - django.contrib.auth Group instance      → auth/group:<id>#member
 #   - any class decorated with @zed_subject   → <type>:<id>
-#   - a SubjectRef passed through unchanged   (covers auth/grant, auth/agent,
-#                                              auth/apikey, auth/service, custom)
+#   - a SubjectRef passed through unchanged   (covers agents/grant, agents/agent,
+#                                              auth/apikey, custom)
 
 class ZedRBACManager:
     def get_queryset(self) -> ZedRBACQuerySet: ...
@@ -671,9 +673,9 @@ The three actor verbs are sugar over the same primitive:
 |---|---|---|
 | `with_actor(actor)` | Resolves `actor` to a `SubjectRef` and pins it on the queryset clone. | The default. Works for any subject type. |
 | `as_user(user)` | Equivalent to `with_actor(to_subject_ref(user))` for a Django `User`. | The HTTP request path: `Post.objects.as_user(request.user)`. |
-| `as_agent(agent, on_behalf_of=u)` | Equivalent to `with_actor(grant_subject_ref(agent, u))` — resolves to an `auth/grant:<id>#valid` subject. | MCP servers and agent runtimes where a Grant is the canonical actor. |
+| `as_agent(agent, on_behalf_of=u)` | Equivalent to `with_actor(grant_subject_ref(agent, u))` — resolves to an `agents/grant:<id>#valid` subject. | MCP servers and agent runtimes where a Grant is the canonical actor. |
 
-`as_agent(agent)` without `on_behalf_of` resolves to a bare `auth/agent:<id>` subject (the agent acting standalone, with only its declared capabilities — no user grants). Use this only for system-initiated agent runs; for end-user-driven agent runs always pass `on_behalf_of=user`.
+`as_agent(agent)` without `on_behalf_of` resolves to a bare `agents/agent:<id>` subject (the agent acting standalone, with only its declared capabilities — no user grants). Use this only for system-initiated agent runs; for end-user-driven agent runs always pass `on_behalf_of=user`. The `agents/agent` and `agents/grant` definitions are NOT auto-emitted — they live in the consumer's own `agents` app, which references this plugin's `auth/user`.
 
 ### `with_actor` vs `sudo` — distinct verbs
 
@@ -737,7 +739,7 @@ Add to `MIDDLEWARE` after `AuthenticationMiddleware`:
 MIDDLEWARE = [
     # ...
     "django.contrib.auth.middleware.AuthenticationMiddleware",
-    "zedrbac.middleware.ActorMiddleware",
+    "zed_rebac.middleware.ActorMiddleware",
     # ...
 ]
 ```
@@ -762,11 +764,11 @@ class PostViewSet(viewsets.ModelViewSet):
 
 Default action map: `list/retrieve→read`, `create→create`, `update/partial_update→write`, `destroy→delete`. Per-viewset overrides via `zed_action_map`.
 
-drf-spectacular OpenAPI emission: optional `zedrbac.drf.spectacular` integration adds a security requirement to operations that include `ZedPermission`. Activated automatically if `drf_spectacular` is installed.
+drf-spectacular OpenAPI emission: optional `zed_rebac.drf.spectacular` integration adds a security requirement to operations that include `ZedPermission`. Activated automatically if `drf_spectacular` is installed.
 
 ### Celery
 
-`zedrbac.celery` connects `before_task_publish` (producer-side) and `task_prerun` (worker-side) signals. Wired automatically by `ZedRBACConfig.ready()` — no per-project setup. Inside a `@shared_task`, the manager picks up the actor from the contextvar that `task_prerun` set:
+`zed_rebac.celery` connects `before_task_publish` (producer-side) and `task_prerun` (worker-side) signals. Wired automatically by `ZedRBACConfig.ready()` — no per-project setup. Inside a `@shared_task`, the manager picks up the actor from the contextvar that `task_prerun` set:
 
 ```python
 @shared_task
@@ -812,7 +814,7 @@ class S3Prefix:
         self.prefix = prefix
 
 # Manual check elsewhere:
-from zedrbac import backend, ObjectRef
+from zed_rebac import backend, ObjectRef
 backend().check_access(
     subject = to_subject_ref(user),
     action  = "read",
@@ -830,17 +832,17 @@ The `@zed_resource` decorator registers the type with the schema validator (the 
 
 | Part | What you import | When to use |
 |---|---|---|
-| `Backend` ABC + `LocalBackend` | `from zedrbac import LocalBackend, ObjectRef, SubjectRef` | You want REBAC checks in code without touching ORM. |
+| `Backend` ABC + `LocalBackend` | `from zed_rebac import LocalBackend, ObjectRef, SubjectRef` | You want REBAC checks in code without touching ORM. |
 | `ZedRBACManager` standalone | `Model.objects = ZedRBACManager.from_queryset(ZedRBACQuerySet)()` | Drop scoping into a model without the metaclass. |
-| `with_actor_queryset(qs, actor)` | `from zedrbac.querysets import with_actor_queryset` | Apply scoping ad-hoc to any queryset. |
-| `check_access(subject, action, resource)` | `from zedrbac import backend; backend().check_access(...)` | Imperative checks anywhere. |
-| `@require_permission` decorator | `from zedrbac import require_permission` | Gate methods on plain Python classes (not just models). |
-| `current_actor()` ContextVar | `from zedrbac import current_actor` | Read the active actor inside any code path. |
-| `with actor_context(actor):` | `from zedrbac import actor_context` | Block-scoped actor for non-queryset code (manual `check_access` calls inside the block). |
-| `with sudo(reason=...)` | `from zedrbac import sudo` | Block-scoped bypass; logged. |
-| `with system_context(reason=...)` | `from zedrbac import system_context` | Like `sudo()`, idiomatic for cron. |
-| `parse_zed(text)` | `from zedrbac.schema import parse_zed` | Tooling: round-trip `permissions.zed` to AST. |
-| `BackendPermission` checker | `from zedrbac.backends import to_subject_ref` | Identity-to-subject conversion (extension point). |
+| `with_actor_queryset(qs, actor)` | `from zed_rebac.querysets import with_actor_queryset` | Apply scoping ad-hoc to any queryset. |
+| `check_access(subject, action, resource)` | `from zed_rebac import backend; backend().check_access(...)` | Imperative checks anywhere. |
+| `@require_permission` decorator | `from zed_rebac import require_permission` | Gate methods on plain Python classes (not just models). |
+| `current_actor()` ContextVar | `from zed_rebac import current_actor` | Read the active actor inside any code path. |
+| `with actor_context(actor):` | `from zed_rebac import actor_context` | Block-scoped actor for non-queryset code (manual `check_access` calls inside the block). |
+| `with sudo(reason=...)` | `from zed_rebac import sudo` | Block-scoped bypass; logged. |
+| `with system_context(reason=...)` | `from zed_rebac import system_context` | Like `sudo()`, idiomatic for cron. |
+| `parse_zed(text)` | `from zed_rebac.schema import parse_zed` | Tooling: round-trip `permissions.zed` to AST. |
+| `BackendPermission` checker | `from zed_rebac.backends import to_subject_ref` | Identity-to-subject conversion (extension point). |
 
 ---
 
@@ -849,24 +851,24 @@ The `@zed_resource` decorator registers the type with the schema validator (the 
 Single namespace `zed-rebac` with subcommands. Two destructive flags, both explicit, neither implicit.
 
 ```bash
-python manage.py zed-rebac sync                       # idempotent; respects no_update
-python manage.py zed-rebac sync --check               # CI gate; no writes; non-zero on drift
-python manage.py zed-rebac sync --force-overwrite     # destructive; bypasses no_update
+python manage.py zed_rebac sync                       # idempotent; respects no_update
+python manage.py zed_rebac sync --check               # CI gate; no writes; non-zero on drift
+python manage.py zed_rebac sync --force-overwrite     # destructive; bypasses no_update
                                                        # requires --yes for non-interactive
-python manage.py zed-rebac sync --force-overwrite --package=blog
-python manage.py zed-rebac sync --force-overwrite --target=blog/post.read
+python manage.py zed_rebac sync --force-overwrite --package=blog
+python manage.py zed_rebac sync --force-overwrite --target=blog/post.read
 
-python manage.py zed-rebac check                      # doctor: validate without writes
-python manage.py zed-rebac build-zed                  # emit effective.zed for SpiceDB
-python manage.py zed-rebac build-zed --check          # CI gate for the build artifact
-python manage.py zed-rebac write-schema               # push current schema to SpiceDB
-python manage.py zed-rebac gc-expired                 # one-shot expiration GC
-python manage.py zed-rebac explain blog/post.read     # print compiled expression
+python manage.py zed_rebac check                      # doctor: validate without writes
+python manage.py zed_rebac build-zed                  # emit effective.zed for SpiceDB
+python manage.py zed_rebac build-zed --check          # CI gate for the build artifact
+python manage.py zed_rebac write-schema               # push current schema to SpiceDB
+python manage.py zed_rebac gc-expired                 # one-shot expiration GC
+python manage.py zed_rebac explain blog/post.read     # print compiled expression
 ```
 
 ### `sync` lifecycle
 
-Default mode. Idempotent. Respects `no_update`. From the [Angee PERMISSIONS blueprint § 5](https://github.com/apexive/django-angee/blob/main/docs/PERMISSIONS.md#5--lifecycle-and-the-sync-command):
+Default mode. Idempotent. Respects `no_update`:
 
 ```
 For each AppConfig that declares zed_schema:
@@ -900,7 +902,7 @@ Build output (`effective.zed`) is **byte-identical** across runs, machines, Pyth
 4. **All set / dict iteration: `sorted(...)`.** Filesystem walks: `sorted(os.listdir(...))`.
 5. **Generator-version stamp**: `// Generated by django-zed-rebac 1.0.0` — pinned to the installed version.
 
-CI determinism test: run `zed-rebac build-zed` twice in a tmpdir, byte-diff. Failure on any difference. Mirrors `manage.py makemigrations --check`.
+CI determinism test: run `zed_rebac build-zed` twice in a tmpdir, byte-diff. Failure on any difference. Mirrors `manage.py makemigrations --check`.
 
 ---
 
@@ -909,10 +911,10 @@ CI determinism test: run `zed-rebac build-zed` twice in a tmpdir, byte-diff. Fai
 | Risk | Mitigation |
 |---|---|
 | Initial install creates a `Relationship` table with billions of rows expected | Indexes shipped in `0001_initial.py`. Migration is idempotent. |
-| Project running `--backwards` to before `zedrbac` was installed | Every `RunSQL` operation has `reverse_sql`. The full schema is reversible. |
+| Project running `--backwards` to before `zed_rebac` was installed | Every `RunSQL` operation has `reverse_sql`. The full schema is reversible. |
 | Swappable `Relationship` model adopted post-install | `swapper.dependency()` already wired in shipped migrations. New custom model gets a fresh migration that the project author writes. |
 | Adding `expires_at` later (back-port to existing relationships) | `expires_at` is nullable; existing rows get `NULL`. No data migration needed. |
-| Multi-tenant prefix added later (`ZED_REBAC_TYPE_PREFIX`) | Changing the prefix requires `manage.py zed-rebac retype-relationships --from=... --to=...`. Documented prominently. |
+| Multi-tenant prefix added later (`ZED_REBAC_TYPE_PREFIX`) | Changing the prefix requires `manage.py zed_rebac retype-relationships --from=... --to=...`. Documented prominently. |
 | Package upgrade silently overwrites admin schema edits | `no_update=True` on `PackageManagedRecord`. Conflict surfaced as warning + audit event. Force-overwrite is explicit. |
 
 ---
@@ -976,7 +978,7 @@ DB:      sqlite (unit) · postgres-15 (integration) · postgres-16 (integration)
 Backend: local · spicedb (when Docker available)
 ```
 
-Type-checked end-to-end: `mypy --strict src/zedrbac/` and `pyright --pythonversion 3.13`. Both run on CI; both must pass. The plugin ships `py.typed` (PEP 561) and `ZedRBACManager[M]` is `Generic[M]` over the model class so query return types are inferred.
+Type-checked end-to-end: `mypy --strict src/zed_rebac/` and `pyright --pythonversion 3.13`. Both run on CI; both must pass. The plugin ships `py.typed` (PEP 561) and `ZedRBACManager[M]` is `Generic[M]` over the model class so query return types are inferred.
 
 ---
 
@@ -990,7 +992,7 @@ Type-checked end-to-end: `mypy --strict src/zedrbac/` and `pyright --pythonversi
 
 LTS support: Django 4.2 LTS through April 2026, Django 5.2 LTS through April 2028. We track Django's own deprecation policy and never force users off LTS prematurely.
 
-Public API (`zedrbac.*` direct imports + the schema language) is semver-stable across same-Django versions. `zedrbac._internal.*` is private. Breaking changes are confined to Django-major bumps.
+Public API (`zed_rebac.*` direct imports + the schema language) is semver-stable across same-Django versions. `zed_rebac._internal.*` is private. Breaking changes are confined to Django-major bumps.
 
 ---
 
@@ -1033,6 +1035,6 @@ Public API (`zedrbac.*` direct imports + the schema language) is semver-stable a
 - **Not an authentication system.** Use `django-allauth`, `dj-rest-auth`, `simple-jwt`, `python-social-auth`, or your own.
 - **Not a session manager.** Django's session middleware is fine.
 - **Not a multi-tenant database router.** Use `django-tenants` or `django-organizations`. `django-zed-rebac` is orthogonal — REBAC works within whatever tenant scope the project provides. (You CAN use `ZED_REBAC_TYPE_PREFIX = "tenant_acme/"` for soft-tenant scoping if rows-per-tenant fit in one DB.)
-- **Not a GraphQL admin layer.** A future `django-zed-rebac-admin` package may add one; v1 ships a Django admin form for `SchemaOverride` and a CLI for `Relationship` introspection. Higher-level frameworks (Angee) layer their own admin surfaces on top.
+- **Not a GraphQL admin layer.** A future `django-zed-rebac-admin` package may add one; v1 ships a Django admin form for `SchemaOverride` and a CLI for `Relationship` introspection. Higher-level frameworks may layer their own admin surfaces on top.
 - **Not an audit-log system.** A future `django-zed-rebac-audit` package may add one; v1 ships `PermissionAuditEvent` and emits structured logs.
 - **Not a policy DSL** like Polar or Cedar. The schema language is SpiceDB's `.zed`, REBAC-first. ABAC fragments are expressed via caveats.

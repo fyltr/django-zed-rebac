@@ -1,0 +1,46 @@
+"""Pluggable backends.
+
+`backend()` returns the singleton instance configured by `ZED_REBAC_BACKEND`.
+The first call instantiates; subsequent calls return the cached instance.
+"""
+from __future__ import annotations
+
+from typing import Optional
+
+from ..conf import app_settings
+from .base import Backend
+from .local import LocalBackend
+from .spicedb import SpiceDBBackend
+
+
+_backend: Optional[Backend] = None
+
+
+def backend() -> Backend:
+    """Resolve and cache the configured backend.
+
+    Lazy: never instantiated at import / app-ready. First check or write
+    triggers construction.
+    """
+    global _backend
+    if _backend is not None:
+        return _backend
+    kind = app_settings.ZED_REBAC_BACKEND
+    if kind == "local":
+        _backend = LocalBackend()
+    elif kind == "spicedb":
+        _backend = SpiceDBBackend()
+    else:
+        raise ValueError(
+            f"Unknown ZED_REBAC_BACKEND={kind!r} (expected 'local' or 'spicedb')"
+        )
+    return _backend
+
+
+def reset_backend() -> None:
+    """Test ergonomics: discard the cached backend so the next `backend()` rebuilds."""
+    global _backend
+    _backend = None
+
+
+__all__ = ["Backend", "LocalBackend", "SpiceDBBackend", "backend", "reset_backend"]

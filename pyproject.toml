@@ -1,0 +1,79 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "django-zed-rebac"
+version = "0.1.0a0"
+description = "Drop-in REBAC engine for Django, SpiceDB-compatible, with a pure-Django LocalBackend."
+readme = "README.md"
+license = { text = "Apache-2.0" }
+requires-python = ">=3.11"
+authors = [{ name = "Apexive", email = "hi@apexive.com" }]
+keywords = ["django", "rebac", "spicedb", "zanzibar", "authorization", "permissions"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Framework :: Django",
+    "Framework :: Django :: 4.2",
+    "Framework :: Django :: 5.2",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Security",
+]
+dependencies = [
+    "django>=4.2",
+]
+
+[project.optional-dependencies]
+spicedb = ["authzed>=0.13"]
+caveats = ["cel-python>=0.1.5"]
+drf = ["djangorestframework>=3.14"]
+dev = [
+    "pytest>=8.0",
+    "pytest-django>=4.8",
+    "ruff>=0.5",
+    "mypy>=1.10",
+]
+
+[project.urls]
+Homepage = "https://github.com/apexive/django-zed-rebac"
+Documentation = "https://github.com/apexive/django-zed-rebac/tree/main/docs"
+Issues = "https://github.com/apexive/django-zed-rebac/issues"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["zed_rebac*"]
+
+[tool.setuptools.package-data]
+zed_rebac = ["py.typed"]
+
+[tool.pytest.ini_options]
+DJANGO_SETTINGS_MODULE = "tests.settings"
+python_files = ["test_*.py"]
+testpaths = ["tests"]
+filterwarnings = [
+    "error",
+    "ignore::DeprecationWarning:django.*",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "RUF"]
+ignore = ["E501"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+plugins = []
+exclude = ["tests/", "build/"]
+
+[[tool.mypy.overrides]]
+module = ["authzed.*", "celery.*", "rest_framework.*"]
+ignore_missing_imports = true
