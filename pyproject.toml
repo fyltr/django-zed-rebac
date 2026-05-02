@@ -57,6 +57,7 @@ rebac = ["py.typed"]
 DJANGO_SETTINGS_MODULE = "tests.settings"
 python_files = ["test_*.py"]
 testpaths = ["tests"]
+pythonpath = ["."]
 filterwarnings = [
     "error",
     "ignore::DeprecationWarning:django.*",
