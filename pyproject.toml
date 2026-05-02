@@ -77,3 +77,7 @@ exclude = ["tests/", "build/"]
 [[tool.mypy.overrides]]
 module = ["authzed.*", "celery.*", "rest_framework.*"]
 ignore_missing_imports = true
+
+
+[tool.ruff.lint.per-file-ignores]
+"tests/testapp/migrations/*.py" = ["I001", "RUF012"]

@@ -15,7 +15,7 @@ from .ast import (
     Relation,
     Schema,
 )
-from .parser import ParseError, parse_zed, validate_schema
+from .parser import ParseError, parse_permission_expression, parse_zed, validate_schema
 
 __all__ = [
     "Schema",
@@ -31,6 +31,7 @@ __all__ = [
     "Caveat",
     "CaveatParam",
     "parse_zed",
+    "parse_permission_expression",
     "validate_schema",
     "ParseError",
 ]

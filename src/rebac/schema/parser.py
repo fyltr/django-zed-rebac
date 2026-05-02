@@ -186,6 +186,16 @@ class _Parser:
                 )
         return schema
 
+    def parse_permission_expression(self) -> PermExpr:
+        """Parse only a permission expression from the token stream."""
+        expr = self._parse_expr_exclusion()
+        if not self.at("eof"):
+            t = self.peek()
+            raise ParseError(
+                f"Unexpected token at line {t.line}, col {t.col}: {t.value!r}"
+            )
+        return expr
+
     def _extract_headers(self) -> dict[str, str]:
         # Re-scan source for `// @key: value` header comments — tokenizer drops comments.
         headers: dict[str, str] = {}
@@ -431,6 +441,11 @@ class _Parser:
 def parse_zed(text: str) -> Schema:
     """Parse a .zed file into a Schema AST."""
     return _Parser(text).parse()
+
+
+def parse_permission_expression(text: str) -> PermExpr:
+    """Public API to parse a single permission expression."""
+    return _Parser(text).parse_permission_expression()
 
 
 def validate_schema(schema: Schema) -> list[str]:

@@ -88,7 +88,7 @@ class LocalBackend(Backend):
             Relation,
             Schema,
         )
-        from ..schema.parser import _Parser  # type: ignore[attr-defined]
+        from ..schema.parser import parse_permission_expression
 
         defs: list[Definition] = []
         for d in SchemaDefinition.objects.prefetch_related("relations", "permissions").order_by(
@@ -108,12 +108,7 @@ class LocalBackend(Backend):
                 relations.append(Relation(r.name, allowed, r.with_expiration))
             permissions: list[Permission] = []
             for p in d.permissions.all().order_by("name"):
-                # Re-parse the expression text using just the expression sub-parser.
-                expr_text = f"definition __tmp__ {{ {self._compose_relations_for_parse(relations)} permission __p__ = {p.expression} }}"
-                pp = _Parser(expr_text)
-                schema = pp.parse()
-                tmp_def = schema.definitions[0]
-                expr = tmp_def.permissions[0].expression
+                expr = parse_permission_expression(p.expression)
                 permissions.append(Permission(p.name, expr, p.expression))
             defs.append(Definition(d.resource_type, tuple(relations), tuple(permissions)))
 
@@ -125,21 +120,6 @@ class LocalBackend(Backend):
             caveats.append(Caveat(c.name, params, c.expression))
 
         return Schema(definitions=defs, caveats=caveats)
-
-    @staticmethod
-    def _compose_relations_for_parse(relations: list) -> str:
-        parts = []
-        for r in relations:
-            subjects = []
-            for s in r.allowed_subjects:
-                if s.wildcard:
-                    subjects.append(f"{s.type}:*")
-                elif s.relation:
-                    subjects.append(f"{s.type}#{s.relation}")
-                else:
-                    subjects.append(s.type)
-            parts.append(f"relation {r.name}: {' | '.join(subjects)}")
-        return " ".join(parts)
 
     # ---------- Public API ----------
 

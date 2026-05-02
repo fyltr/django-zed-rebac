@@ -1,0 +1,5 @@
+include README.md
+include LICENSE*
+recursive-include src/rebac *.typed
+recursive-exclude * __pycache__ *.py[cod]
+prune src/django_zed_rebac.egg-info

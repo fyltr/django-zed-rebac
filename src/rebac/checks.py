@@ -80,3 +80,32 @@ def check_auth_backend_installed(
             )
         ]
     return []
+
+
+@checks.register("rebac")
+def check_actor_middleware_order(
+    app_configs: Any = None, **kwargs: Any
+) -> list[checks.CheckMessage]:
+    """Ensure ActorMiddleware appears after AuthenticationMiddleware."""
+    from django.conf import settings
+
+    middleware = list(getattr(settings, "MIDDLEWARE", []))
+    actor_path = "rebac.middleware.ActorMiddleware"
+    auth_path = "django.contrib.auth.middleware.AuthenticationMiddleware"
+    if actor_path not in middleware:
+        return []
+    if auth_path not in middleware:
+        return [
+            checks.Error(
+                f"{actor_path} requires {auth_path} in MIDDLEWARE.",
+                id="rebac.E003",
+            )
+        ]
+    if middleware.index(actor_path) < middleware.index(auth_path):
+        return [
+            checks.Error(
+                f"{actor_path} must appear after {auth_path} in MIDDLEWARE.",
+                id="rebac.E004",
+            )
+        ]
+    return []
