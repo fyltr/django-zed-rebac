@@ -27,3 +27,21 @@ class Post(RebacMixin, models.Model):
     class Meta:
         app_label = "testapp"
         rebac_resource_type = "blog/post"
+
+
+class SluggedPost(RebacMixin, models.Model):
+    """Exercises ``Meta.rebac_id_attr`` — REBAC keys on ``slug``, not ``pk``.
+
+    Mirrors the shape of an Angee model with a ``sqid`` field: an
+    auto-PK Django row plus a stable, public, string id used as the
+    REBAC resource_id. Tests in ``tests/test_id_attr.py`` round-trip
+    relationship rows + manager scoping through the slug column.
+    """
+
+    slug = models.CharField(max_length=64, unique=True)
+    title = models.CharField(max_length=200)
+
+    class Meta:
+        app_label = "testapp"
+        rebac_resource_type = "blog/sluggedpost"
+        rebac_id_attr = "slug"
