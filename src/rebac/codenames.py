@@ -3,6 +3,7 @@
 Used by the Django auth backend to translate `user.has_perm("blog.view_post")`
 into a REBAC `read` check.
 """
+
 from __future__ import annotations
 
 DEFAULT_CODENAME_MAP: dict[str, str] = {

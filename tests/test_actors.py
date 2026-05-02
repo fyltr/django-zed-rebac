@@ -1,4 +1,5 @@
 """Tests for actor resolution + sudo / system_context."""
+
 from __future__ import annotations
 
 import pytest
@@ -8,11 +9,11 @@ from rebac import (
     SubjectRef,
     actor_context,
     current_actor,
+    rebac_subject,
     sudo,
     to_subject_ref,
-    rebac_subject,
 )
-from rebac.actors import is_sudo, current_sudo_reason
+from rebac.actors import current_sudo_reason, is_sudo
 from rebac.errors import SudoReasonRequiredError
 
 
@@ -24,6 +25,7 @@ def test_subject_ref_passes_through():
 @pytest.mark.django_db
 def test_django_user_to_subject_ref():
     from django.contrib.auth import get_user_model
+
     User = get_user_model()
     u = User.objects.create(username="alice", is_active=True)
     ref = to_subject_ref(u)
@@ -34,6 +36,7 @@ def test_django_user_to_subject_ref():
 @pytest.mark.django_db
 def test_django_group_to_subject_ref():
     from django.contrib.auth.models import Group
+
     g = Group.objects.create(name="eng")
     ref = to_subject_ref(g)
     assert ref.subject_type == "auth/group"

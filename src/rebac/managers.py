@@ -9,9 +9,10 @@ Per ARCHITECTURE.md § Three actor-resolution paths:
 The actor lives on the queryset instance (NOT a ContextVar). It survives
 chaining via `_clone()` and propagates into instances via `from_db()`.
 """
+
 from __future__ import annotations
 
-from typing import Any, Iterable
+from typing import Any
 
 from django.db import models
 
@@ -20,8 +21,8 @@ from .actors import current_actor as _current_actor
 from .actors import grant_subject_ref, to_subject_ref
 from .actors import is_sudo as _is_sudo_ambient
 from .conf import app_settings
-from .errors import MissingActorError, NoActorResolvedError, PermissionDenied
-from .types import ObjectRef, SubjectRef
+from .errors import MissingActorError, PermissionDenied
+from .types import SubjectRef
 
 
 class RebacQuerySet(models.QuerySet):
@@ -46,7 +47,7 @@ class RebacQuerySet(models.QuerySet):
 
     # ----- Actor verbs -----
 
-    def with_actor(self, actor: Any) -> "RebacQuerySet":
+    def with_actor(self, actor: Any) -> RebacQuerySet:
         """Pin a SubjectRef on the queryset. Generic verb — accepts any ActorLike."""
         ref = actor if isinstance(actor, SubjectRef) else to_subject_ref(actor)
         clone = self._clone()
@@ -54,15 +55,15 @@ class RebacQuerySet(models.QuerySet):
         clone._rebac_sudo_reason = None
         return clone
 
-    def as_user(self, user: Any) -> "RebacQuerySet":
+    def as_user(self, user: Any) -> RebacQuerySet:
         """Typed shorthand: scope to a Django User."""
         return self.with_actor(to_subject_ref(user))
 
-    def as_agent(self, agent: Any, *, on_behalf_of: Any | None = None) -> "RebacQuerySet":
+    def as_agent(self, agent: Any, *, on_behalf_of: Any | None = None) -> RebacQuerySet:
         """Typed shorthand: scope to an agent acting via a Grant."""
         return self.with_actor(grant_subject_ref(agent, on_behalf_of))
 
-    def sudo(self, *, reason: str) -> "RebacQuerySet":
+    def sudo(self, *, reason: str) -> RebacQuerySet:
         """Bypass REBAC for this queryset. Mandatory `reason`."""
         from .actors import _sudo_state  # noqa: F401  — sanity import
         from .errors import (
@@ -81,7 +82,7 @@ class RebacQuerySet(models.QuerySet):
         clone._rebac_sudo_reason = reason
         return clone
 
-    def system_context(self, *, reason: str) -> "RebacQuerySet":
+    def system_context(self, *, reason: str) -> RebacQuerySet:
         return self.sudo(reason=reason)
 
     def actor(self) -> SubjectRef | None:
@@ -139,6 +140,7 @@ class RebacQuerySet(models.QuerySet):
         from django.db.models import Q
 
         from .backends import backend
+
         action = getattr(self.model._meta, "rebac_default_action", "read")
         ids = list(
             backend().accessible(
@@ -171,7 +173,7 @@ class RebacQuerySet(models.QuerySet):
         # ``Q.add_q`` works even on sliced queries.
         self.query.add_q(Q(**{f"{attr}__in": ids}))
 
-    def _clone(self, **kwargs: Any) -> "RebacQuerySet":  # type: ignore[override]
+    def _clone(self, **kwargs: Any) -> RebacQuerySet:  # type: ignore[override]
         clone = super()._clone(**kwargs)
         clone._rebac_actor = self._rebac_actor
         clone._rebac_sudo_reason = self._rebac_sudo_reason
@@ -230,14 +232,10 @@ class RebacQuerySet(models.QuerySet):
         rebac_type = self.model._meta.rebac_resource_type  # type: ignore[attr-defined]
         attr = resource_id_attr(self.model)
         # Pre-fetch ids in scope, intersect with allowed.
-        affected = {
-            str(v) for v in self.values_list(attr, flat=True)
-        }
+        affected = {str(v) for v in self.values_list(attr, flat=True)}
         if not affected:
             return
-        allowed = set(
-            backend().accessible(subject=actor, action=action, resource_type=rebac_type)
-        )
+        allowed = set(backend().accessible(subject=actor, action=action, resource_type=rebac_type))
         denied = affected - allowed
         if denied:
             sample = ", ".join(sorted(denied)[:5])

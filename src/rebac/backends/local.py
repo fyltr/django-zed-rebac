@@ -16,11 +16,12 @@ when `REBAC_PK_IN_THRESHOLD` is exceeded; for v0.1 we use the Python walk
 with prefetched relationship rows. The same code path runs on Postgres / MySQL
 / SQLite identically.
 """
+
 from __future__ import annotations
 
 import time
+from collections.abc import Iterable
 from threading import Lock
-from typing import Iterable
 
 from ..conf import app_settings
 from ..errors import PermissionDepthExceeded
@@ -76,11 +77,8 @@ class LocalBackend(Backend):
         from ..models import (
             SchemaCaveat,
             SchemaDefinition,
-            SchemaPermission,
-            SchemaRelation,
         )
         from ..schema.ast import (
-            AllowedSubject,
             Caveat,
             CaveatParam,
             Definition,
@@ -88,7 +86,7 @@ class LocalBackend(Backend):
             Relation,
             Schema,
         )
-        from ..schema.parser import _Parser  # type: ignore[attr-defined]
+        from ..schema.parser import parse_permission_expression
 
         defs: list[Definition] = []
         for d in SchemaDefinition.objects.prefetch_related("relations", "permissions").order_by(
@@ -108,38 +106,16 @@ class LocalBackend(Backend):
                 relations.append(Relation(r.name, allowed, r.with_expiration))
             permissions: list[Permission] = []
             for p in d.permissions.all().order_by("name"):
-                # Re-parse the expression text using just the expression sub-parser.
-                expr_text = f"definition __tmp__ {{ {self._compose_relations_for_parse(relations)} permission __p__ = {p.expression} }}"
-                pp = _Parser(expr_text)
-                schema = pp.parse()
-                tmp_def = schema.definitions[0]
-                expr = tmp_def.permissions[0].expression
+                expr = parse_permission_expression(p.expression)
                 permissions.append(Permission(p.name, expr, p.expression))
             defs.append(Definition(d.resource_type, tuple(relations), tuple(permissions)))
 
         caveats = []
         for c in SchemaCaveat.objects.order_by("name"):
-            params = tuple(
-                CaveatParam(p["name"], p["type"]) for p in (c.params or [])
-            )
+            params = tuple(CaveatParam(p["name"], p["type"]) for p in (c.params or []))
             caveats.append(Caveat(c.name, params, c.expression))
 
         return Schema(definitions=defs, caveats=caveats)
-
-    @staticmethod
-    def _compose_relations_for_parse(relations: list) -> str:
-        parts = []
-        for r in relations:
-            subjects = []
-            for s in r.allowed_subjects:
-                if s.wildcard:
-                    subjects.append(f"{s.type}:*")
-                elif s.relation:
-                    subjects.append(f"{s.type}#{s.relation}")
-                else:
-                    subjects.append(s.type)
-            parts.append(f"relation {r.name}: {' | '.join(subjects)}")
-        return " ".join(parts)
 
     # ---------- Public API ----------
 
@@ -156,10 +132,16 @@ class LocalBackend(Backend):
         # has the action on). Treat as "is the accessible() set non-empty?".
         if not resource.resource_id:
             try:
-                next(iter(self.accessible(
-                    subject=subject, action=action,
-                    resource_type=resource.resource_type, context=context,
-                )))
+                next(
+                    iter(
+                        self.accessible(
+                            subject=subject,
+                            action=action,
+                            resource_type=resource.resource_type,
+                            context=context,
+                        )
+                    )
+                )
             except StopIteration:
                 return CheckResult.no()
             return CheckResult.has()
@@ -255,8 +237,7 @@ class LocalBackend(Backend):
             subject_type=subject_type,
         )
         return [
-            SubjectRef.of(r.subject_type, r.subject_id, r.optional_subject_relation)
-            for r in rows
+            SubjectRef.of(r.subject_type, r.subject_id, r.optional_subject_relation) for r in rows
         ]
 
     def write_relationships(self, writes: Iterable[RelationshipTuple]) -> Zookie:
@@ -315,9 +296,7 @@ class LocalBackend(Backend):
         # Depth counts dispatch hops (arrow walks + subject-set traversals),
         # not expression-tree shape. Binary operators don't increment depth.
         if depth > app_settings.REBAC_DEPTH_LIMIT:
-            raise PermissionDepthExceeded(
-                f"Depth limit {app_settings.REBAC_DEPTH_LIMIT} exceeded"
-            )
+            raise PermissionDepthExceeded(f"Depth limit {app_settings.REBAC_DEPTH_LIMIT} exceeded")
         if isinstance(expr, PermNil):
             return False
         if isinstance(expr, PermRef):
@@ -338,6 +317,7 @@ class LocalBackend(Backend):
             return False
         if isinstance(expr, PermArrow):
             from ..models import Relationship as RelationshipModel
+
             via = _find_relation(definition, expr.via)
             if via is None:
                 return False
@@ -360,27 +340,19 @@ class LocalBackend(Backend):
                     return True
             return False
         if isinstance(expr, PermBinOp):
-            left = self._eval_permission(
-                expr.left, definition, resource_id, subject, depth
-            )
+            left = self._eval_permission(expr.left, definition, resource_id, subject, depth)
             if expr.op == "+":
                 if left:
                     return True
-                return self._eval_permission(
-                    expr.right, definition, resource_id, subject, depth
-                )
+                return self._eval_permission(expr.right, definition, resource_id, subject, depth)
             if expr.op == "&":
                 if not left:
                     return False
-                return self._eval_permission(
-                    expr.right, definition, resource_id, subject, depth
-                )
+                return self._eval_permission(expr.right, definition, resource_id, subject, depth)
             if expr.op == "-":
                 if not left:
                     return False
-                right = self._eval_permission(
-                    expr.right, definition, resource_id, subject, depth
-                )
+                right = self._eval_permission(expr.right, definition, resource_id, subject, depth)
                 return not right
             raise ValueError(f"unknown operator: {expr.op}")
         raise TypeError(f"unknown PermExpr: {expr!r}")
@@ -393,9 +365,7 @@ class LocalBackend(Backend):
         subject: SubjectRef,
         depth: int,
     ) -> bool:
-        permission = next(
-            (p for p in definition.permissions if p.name == permission_name), None
-        )
+        permission = next((p for p in definition.permissions if p.name == permission_name), None)
         if permission is None:
             # Treat as direct relation lookup.
             return self._has_direct_relation(
@@ -405,9 +375,7 @@ class LocalBackend(Backend):
                 subject=subject,
                 depth=depth,
             )
-        return self._eval_permission(
-            permission.expression, definition, resource_id, subject, depth
-        )
+        return self._eval_permission(permission.expression, definition, resource_id, subject, depth)
 
     def _has_direct_relation(
         self,
@@ -420,9 +388,7 @@ class LocalBackend(Backend):
         # Subject-set rows count as a dispatch hop, so callers add 1 there;
         # the entry guard catches runaway recursion.
         if depth > app_settings.REBAC_DEPTH_LIMIT:
-            raise PermissionDepthExceeded(
-                f"Depth limit {app_settings.REBAC_DEPTH_LIMIT} exceeded"
-            )
+            raise PermissionDepthExceeded(f"Depth limit {app_settings.REBAC_DEPTH_LIMIT} exceeded")
         from ..models import Relationship as RelationshipModel
 
         rows = RelationshipModel.objects.filter(
@@ -471,9 +437,7 @@ class LocalBackend(Backend):
         cache: dict[tuple[str, str], set[str] | None],
     ) -> set[str]:
         if depth > app_settings.REBAC_DEPTH_LIMIT:
-            raise PermissionDepthExceeded(
-                f"Depth limit {app_settings.REBAC_DEPTH_LIMIT} exceeded"
-            )
+            raise PermissionDepthExceeded(f"Depth limit {app_settings.REBAC_DEPTH_LIMIT} exceeded")
         if isinstance(expr, PermNil):
             return set()
         if isinstance(expr, PermRef):
@@ -494,6 +458,7 @@ class LocalBackend(Backend):
             return set()
         if isinstance(expr, PermArrow):
             from ..models import Relationship as RelationshipModel
+
             via_rel = _find_relation(definition, expr.via)
             if via_rel is None:
                 return set()
@@ -586,9 +551,7 @@ class LocalBackend(Backend):
         cache: dict[tuple[str, str], set[str] | None] | None = None,
     ) -> set[str]:
         if depth > app_settings.REBAC_DEPTH_LIMIT:
-            raise PermissionDepthExceeded(
-                f"Depth limit {app_settings.REBAC_DEPTH_LIMIT} exceeded"
-            )
+            raise PermissionDepthExceeded(f"Depth limit {app_settings.REBAC_DEPTH_LIMIT} exceeded")
         from ..models import Relationship as RelationshipModel
 
         result: set[str] = set()
@@ -645,6 +608,7 @@ class LocalBackend(Backend):
 
 # ---------- Module-level helpers ----------
 
+
 def _find_relation(definition: Definition, name: str) -> Relation | None:
     for r in definition.relations:
         if r.name == name:
@@ -672,6 +636,7 @@ def _filter_active(qs: object) -> object:
     """Exclude expired rows. Postgres-friendly via a parameterised filter."""
     from django.db.models import Q
     from django.utils import timezone
+
     return qs.filter(Q(expires_at__isnull=True) | Q(expires_at__gt=timezone.now()))  # type: ignore[attr-defined]
 
 
@@ -680,4 +645,5 @@ def _is_active(row: object) -> bool:
     if expires_at is None:
         return True
     from django.utils import timezone
+
     return expires_at > timezone.now()

@@ -3,13 +3,13 @@
 Read via the public `app_settings` proxy — never call `getattr(settings, ...)`
 directly inside the package; use `app_settings.<KEY>`.
 """
+
 from __future__ import annotations
 
 from typing import Any
 
 from django.conf import settings
 from django.test.signals import setting_changed
-
 
 _DEFAULTS: dict[str, Any] = {
     "REBAC_BACKEND": "local",

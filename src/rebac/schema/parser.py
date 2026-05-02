@@ -6,6 +6,7 @@ type unions and subject sets, permissions with `+`/`&`/`-`/arrows, caveats,
 wildcards, `use expiration`, `use typechecking`. Does NOT cover composable
 schemas (`use import`), `use self`, or the `nil` shortcut beyond keyword.
 """
+
 from __future__ import annotations
 
 import re
@@ -19,9 +20,9 @@ from .ast import (
     PermArrow,
     PermBinOp,
     PermExpr,
+    Permission,
     PermNil,
     PermRef,
-    Permission,
     Relation,
     Schema,
 )
@@ -37,9 +38,10 @@ class ParseError(Exception):
 
 # ---------- Tokenizer ----------
 
+
 @dataclass
 class Token:
-    kind: str       # "ident", "type", "punct", "keyword", "string", "eof"
+    kind: str  # "ident", "type", "punct", "keyword", "string", "eof"
     value: str
     line: int
     col: int
@@ -78,7 +80,7 @@ def _tokenize(text: str) -> list[Token]:
             j = text.find("*/", i + 2)
             if j == -1:
                 raise ParseError(f"Unterminated block comment at line {line}")
-            for ch in text[i:j + 2]:
+            for ch in text[i : j + 2]:
                 if ch == "\n":
                     line += 1
                     col = 1
@@ -119,9 +121,9 @@ def _tokenize(text: str) -> list[Token]:
                     j += 1
             if j >= n:
                 raise ParseError(f"Unterminated string at line {line}")
-            tokens.append(Token("string", text[i + 1: j], line, col))
+            tokens.append(Token("string", text[i + 1 : j], line, col))
             i = j + 1
-            col += (j + 1 - i + len(text[i + 1:j]))
+            col += j + 1 - i + len(text[i + 1 : j])
             continue
         raise ParseError(f"Unexpected character {c!r} at line {line}, col {col}")
     tokens.append(Token("eof", "", line, col))
@@ -129,6 +131,7 @@ def _tokenize(text: str) -> list[Token]:
 
 
 # ---------- Parser ----------
+
 
 class _Parser:
     def __init__(self, text: str):
@@ -181,10 +184,16 @@ class _Parser:
                 schema.caveats.append(self._parse_caveat())
             else:
                 t = self.peek()
-                raise ParseError(
-                    f"Unexpected token at line {t.line}, col {t.col}: {t.value!r}"
-                )
+                raise ParseError(f"Unexpected token at line {t.line}, col {t.col}: {t.value!r}")
         return schema
+
+    def parse_permission_expression(self) -> PermExpr:
+        """Parse only a permission expression from the token stream."""
+        expr = self._parse_expr_exclusion()
+        if not self.at("eof"):
+            t = self.peek()
+            raise ParseError(f"Unexpected token at line {t.line}, col {t.col}: {t.value!r}")
+        return expr
 
     def _extract_headers(self) -> dict[str, str]:
         # Re-scan source for `// @key: value` header comments — tokenizer drops comments.
@@ -214,9 +223,7 @@ class _Parser:
                 permissions.append(self._parse_permission())
             else:
                 t = self.peek()
-                raise ParseError(
-                    f"Expected relation/permission at line {t.line}; got {t.value!r}"
-                )
+                raise ParseError(f"Expected relation/permission at line {t.line}; got {t.value!r}")
         self.expect("punct", "}")
         return Definition(resource_type, tuple(relations), tuple(permissions))
 
@@ -278,7 +285,7 @@ class _Parser:
         expr = self._parse_expr_exclusion()
         # Reconstruct raw text from consumed tokens — best-effort.
         raw_pieces: list[str] = []
-        for tok in self.tokens[start:self.pos]:
+        for tok in self.tokens[start : self.pos]:
             raw_pieces.append(tok.value)
         return Permission(name, expr, " ".join(raw_pieces))
 
@@ -405,7 +412,7 @@ class _Parser:
 
     def _advance_past_offset(self, target_offset: int) -> None:
         """Move the token cursor to the first token whose start offset >= target."""
-        for idx, tok in enumerate(self.tokens[self.pos:], start=self.pos):
+        for idx, tok in enumerate(self.tokens[self.pos :], start=self.pos):
             if tok.kind == "eof":
                 self.pos = idx
                 return
@@ -433,13 +440,17 @@ def parse_zed(text: str) -> Schema:
     return _Parser(text).parse()
 
 
+def parse_permission_expression(text: str) -> PermExpr:
+    """Public API to parse a single permission expression."""
+    return _Parser(text).parse_permission_expression()
+
+
 def validate_schema(schema: Schema) -> list[str]:
     """Cross-check references inside the schema. Returns a list of error strings.
 
     Empty list means valid.
     """
     errors: list[str] = []
-    type_names = {d.resource_type for d in schema.definitions}
     caveat_names = {c.name for c in schema.caveats}
 
     for definition in schema.definitions:
@@ -458,7 +469,9 @@ def validate_schema(schema: Schema) -> list[str]:
                     )
 
         for perm in definition.permissions:
-            errors.extend(_validate_expr(perm.expression, definition, relation_names, permission_names))
+            errors.extend(
+                _validate_expr(perm.expression, definition, relation_names, permission_names)
+            )
         # Detect duplicate names within a definition.
         all_names = list(relation_names) + list(permission_names)
         if len(all_names) != len(set(all_names)):

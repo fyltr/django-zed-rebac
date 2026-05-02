@@ -10,6 +10,7 @@ the apps registry is ready. Use `from rebac import RebacMixin` from
 *application code* (after Django setup); inside another package's models.py
 that's the supported import.
 """
+
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
@@ -23,11 +24,11 @@ from .actors import (
     actor_context,
     current_actor,
     grant_subject_ref,
+    rebac_subject,
     set_current_actor,
     sudo,
     system_context,
     to_subject_ref,
-    rebac_subject,
 )
 from .conf import app_settings
 from .errors import (
@@ -36,8 +37,8 @@ from .errors import (
     NoActorResolvedError,
     PermissionDenied,
     PermissionDepthExceeded,
-    SchemaError,
     RebacError,
+    SchemaError,
 )
 from .types import (
     CheckResult,
@@ -51,8 +52,8 @@ from .types import (
 
 if TYPE_CHECKING:
     from .backends import Backend, LocalBackend, SpiceDBBackend
+    from .decorators import rebac_resource, require_permission
     from .mixins import RebacMixin
-    from .decorators import require_permission, rebac_resource
     from .relationships import delete_relationships, write_relationships
     from .resources import to_object_ref
 
@@ -76,8 +77,10 @@ def __getattr__(name: str) -> Any:
     if target is None:
         raise AttributeError(f"module 'rebac' has no attribute {name!r}")
     from importlib import import_module
+
     module = import_module(target[0])
     return getattr(module, target[1])
+
 
 __all__ = [
     "__version__",

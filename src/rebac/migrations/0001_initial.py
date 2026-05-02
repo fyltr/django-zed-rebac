@@ -6,7 +6,6 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-
     initial = True
 
     dependencies = [
@@ -24,7 +23,10 @@ class Migration(migrations.Migration):
                 ("relation", models.CharField(db_index=True, max_length=64)),
                 ("subject_type", models.CharField(db_index=True, max_length=64)),
                 ("subject_id", models.CharField(db_index=True, max_length=64)),
-                ("optional_subject_relation", models.CharField(blank=True, default="", max_length=64)),
+                (
+                    "optional_subject_relation",
+                    models.CharField(blank=True, default="", max_length=64),
+                ),
                 ("caveat_name", models.CharField(blank=True, default="", max_length=64)),
                 ("caveat_context", models.JSONField(blank=True, null=True)),
                 ("expires_at", models.DateTimeField(blank=True, db_index=True, null=True)),
@@ -146,9 +148,7 @@ class Migration(migrations.Migration):
         ),
         migrations.AddIndex(
             model_name="packagemanagedrecord",
-            index=models.Index(
-                fields=["target_ct", "target_pk"], name="rebac_pmr_target_idx"
-            ),
+            index=models.Index(fields=["target_ct", "target_pk"], name="rebac_pmr_target_idx"),
         ),
         migrations.CreateModel(
             name="SchemaOverride",
@@ -192,9 +192,7 @@ class Migration(migrations.Migration):
         ),
         migrations.AddIndex(
             model_name="schemaoverride",
-            index=models.Index(
-                fields=["target_ct", "target_pk"], name="rebac_ovr_target_idx"
-            ),
+            index=models.Index(fields=["target_ct", "target_pk"], name="rebac_ovr_target_idx"),
         ),
         migrations.CreateModel(
             name="PermissionAuditEvent",

@@ -1,4 +1,5 @@
 """SchemaOverride — Tier 2 admin-editable tweaks."""
+
 from __future__ import annotations
 
 from django.conf import settings

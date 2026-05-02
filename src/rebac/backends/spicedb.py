@@ -4,9 +4,10 @@ Stub for v0.1. Real implementation lands in 0.5 per the roadmap. The class
 exists so `REBAC_BACKEND = "spicedb"` raises a clear ImportError today,
 not a generic AttributeError.
 """
+
 from __future__ import annotations
 
-from typing import Iterable
+from collections.abc import Iterable
 
 from ..conf import app_settings
 from ..types import (
@@ -40,10 +41,7 @@ class SpiceDBBackend(Backend):
                 "Install with: pip install django-zed-rebac[spicedb]"
             ) from exc
         if not app_settings.REBAC_SPICEDB_ENDPOINT:
-            raise RuntimeError(
-                "REBAC_SPICEDB_ENDPOINT must be set when "
-                "REBAC_BACKEND='spicedb'"
-            )
+            raise RuntimeError("REBAC_SPICEDB_ENDPOINT must be set when REBAC_BACKEND='spicedb'")
         # Real client wiring is deferred to v0.5.
         raise NotImplementedError(
             "SpiceDBBackend is not yet implemented in 0.1. "

@@ -1,8 +1,9 @@
 """Backend ABC. All backends present this surface — see ARCHITECTURE.md § Unified check API."""
+
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import Iterable
+from collections.abc import Iterable
 
 from ..types import (
     CheckResult,
@@ -75,9 +76,7 @@ class Backend(ABC):
         """Reverse: who has `action` on this resource?"""
 
     @abstractmethod
-    def write_relationships(self, writes: Iterable[RelationshipTuple]) -> Zookie:
-        ...
+    def write_relationships(self, writes: Iterable[RelationshipTuple]) -> Zookie: ...
 
     @abstractmethod
-    def delete_relationships(self, filter_: RelationshipFilter) -> Zookie:
-        ...
+    def delete_relationships(self, filter_: RelationshipFilter) -> Zookie: ...

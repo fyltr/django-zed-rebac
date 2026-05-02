@@ -16,12 +16,14 @@ classifiers = [
     "Framework :: Django",
     "Framework :: Django :: 4.2",
     "Framework :: Django :: 5.2",
+    "Framework :: Django :: 6.0",
     "Intended Audience :: Developers",
     "License :: OSI Approved :: Apache Software License",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
     "Topic :: Security",
 ]
 dependencies = [
@@ -55,6 +57,7 @@ rebac = ["py.typed"]
 DJANGO_SETTINGS_MODULE = "tests.settings"
 python_files = ["test_*.py"]
 testpaths = ["tests"]
+pythonpath = ["."]
 filterwarnings = [
     "error",
     "ignore::DeprecationWarning:django.*",
@@ -77,3 +80,14 @@ exclude = ["tests/", "build/"]
 [[tool.mypy.overrides]]
 module = ["authzed.*", "celery.*", "rest_framework.*"]
 ignore_missing_imports = true
+
+
+[tool.ruff.lint.per-file-ignores]
+# Lazy `__getattr__` shim plus grouped (not alphabetised) `__all__` is intentional;
+# see CLAUDE.md § "Don't import ZedRBACMixin from `__init__.py` eagerly".
+"src/rebac/__init__.py" = ["E402", "RUF022"]
+# Django Meta options (indexes, constraints, ordering, operations) MUST be class-level
+# lists/sets/tuples — that's the framework's convention.
+"src/rebac/models/*.py" = ["RUF012"]
+"src/rebac/migrations/*.py" = ["RUF012"]
+"tests/testapp/migrations/*.py" = ["I001", "RUF012"]

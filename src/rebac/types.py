@@ -3,11 +3,12 @@
 Wire-shape mirrors `authzed.api.v1` so `LocalBackend` ↔ `SpiceDBBackend` is a
 configuration swap.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from enum import Enum
-from typing import Any, Optional
+from enum import StrEnum
+from typing import Any
 
 
 @dataclass(frozen=True, slots=True)
@@ -21,7 +22,7 @@ class ObjectRef:
         return f"{self.resource_type}:{self.resource_id}"
 
     @classmethod
-    def parse(cls, s: str) -> "ObjectRef":
+    def parse(cls, s: str) -> ObjectRef:
         if ":" not in s:
             raise ValueError(f"Invalid ObjectRef: {s!r} (expected '<type>:<id>')")
         rt, rid = s.split(":", 1)
@@ -53,18 +54,18 @@ class SubjectRef:
         return self.object.resource_id
 
     @classmethod
-    def parse(cls, s: str) -> "SubjectRef":
+    def parse(cls, s: str) -> SubjectRef:
         rel = ""
         if "#" in s:
             s, rel = s.split("#", 1)
         return cls(object=ObjectRef.parse(s), optional_relation=rel)
 
     @classmethod
-    def of(cls, type_: str, id_: str, relation: str = "") -> "SubjectRef":
+    def of(cls, type_: str, id_: str, relation: str = "") -> SubjectRef:
         return cls(ObjectRef(type_, str(id_)), relation)
 
 
-class PermissionResult(str, Enum):
+class PermissionResult(StrEnum):
     """Three-state check result."""
 
     HAS_PERMISSION = "HAS_PERMISSION"
@@ -84,25 +85,25 @@ class CheckResult:
     allowed: bool
     result: PermissionResult = PermissionResult.NO_PERMISSION
     conditional_on: tuple[str, ...] = ()
-    reason: Optional[str] = None
+    reason: str | None = None
 
-    def __bool__(self) -> bool:  # noqa: D401
+    def __bool__(self) -> bool:
         return self.allowed
 
     @classmethod
-    def has(cls, reason: str | None = None) -> "CheckResult":
+    def has(cls, reason: str | None = None) -> CheckResult:
         return cls(True, PermissionResult.HAS_PERMISSION, (), reason)
 
     @classmethod
-    def no(cls, reason: str | None = None) -> "CheckResult":
+    def no(cls, reason: str | None = None) -> CheckResult:
         return cls(False, PermissionResult.NO_PERMISSION, (), reason)
 
     @classmethod
-    def conditional(cls, missing: tuple[str, ...], reason: str | None = None) -> "CheckResult":
+    def conditional(cls, missing: tuple[str, ...], reason: str | None = None) -> CheckResult:
         return cls(False, PermissionResult.CONDITIONAL_PERMISSION, tuple(missing), reason)
 
 
-class Consistency(str, Enum):
+class Consistency(StrEnum):
     """Mirrors SpiceDB's `Consistency` requirement values."""
 
     MINIMIZE_LATENCY = "minimize_latency"
@@ -125,7 +126,7 @@ class Zookie:
         return f"{self.backend}.{self.token}"
 
     @classmethod
-    def parse(cls, s: str) -> "Zookie":
+    def parse(cls, s: str) -> Zookie:
         if "." not in s:
             raise ValueError(f"Invalid Zookie: {s!r}")
         backend, token = s.split(".", 1)
@@ -141,7 +142,7 @@ class RelationshipTuple:
     subject: SubjectRef
     caveat_name: str = ""
     caveat_context: dict[str, Any] = field(default_factory=dict)
-    expires_at: Optional[Any] = None  # datetime — typed loosely to keep types.py import-light
+    expires_at: Any | None = None  # datetime — typed loosely to keep types.py import-light
 
     def canonical_key(self) -> tuple[str, str, str, str, str, str, str]:
         return (

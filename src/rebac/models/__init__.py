@@ -3,6 +3,7 @@
 Six tables: Relationship + Schema* (4) + PackageManagedRecord + SchemaOverride
 + PermissionAuditEvent. Per ARCHITECTURE.md § Models.
 """
+
 from __future__ import annotations
 
 from .audit import PermissionAuditEvent
@@ -17,12 +18,12 @@ from .schema import (
 )
 
 __all__ = [
-    "Relationship",
-    "SchemaDefinition",
-    "SchemaRelation",
-    "SchemaPermission",
-    "SchemaCaveat",
     "PackageManagedRecord",
-    "SchemaOverride",
     "PermissionAuditEvent",
+    "Relationship",
+    "SchemaCaveat",
+    "SchemaDefinition",
+    "SchemaOverride",
+    "SchemaPermission",
+    "SchemaRelation",
 ]
