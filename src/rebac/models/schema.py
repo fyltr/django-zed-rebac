@@ -1,4 +1,5 @@
 """Tier 1 baseline — schema rows loaded from each app's permissions.zed."""
+
 from __future__ import annotations
 
 from django.db import models

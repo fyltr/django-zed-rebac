@@ -1,14 +1,16 @@
 """Public decorators."""
+
 from __future__ import annotations
 
+from collections.abc import Callable
 from functools import wraps
-from typing import Any, Callable
+from typing import Any
 
 from .actors import current_actor, is_sudo
 from .errors import NoActorResolvedError, PermissionDenied
-from .resources import to_object_ref, rebac_resource as _rebac_resource_register
+from .resources import rebac_resource as _rebac_resource_register
+from .resources import to_object_ref
 from .types import ObjectRef
-
 
 rebac_resource = _rebac_resource_register
 
@@ -48,6 +50,7 @@ def require_permission(
             # Resolve actor.
             if actor_arg and actor_arg in kwargs:
                 from .actors import to_subject_ref
+
                 actor_ref = to_subject_ref(kwargs[actor_arg])
             else:
                 actor_ref = current_actor()
@@ -72,13 +75,9 @@ def require_permission(
                     "@require_permission requires either resource_type=... or resource_arg=..."
                 )
 
-            result = backend().check_access(
-                subject=actor_ref, action=action, resource=resource
-            )
+            result = backend().check_access(subject=actor_ref, action=action, resource=resource)
             if not result.allowed:
-                raise PermissionDenied(
-                    f"Denied: {actor_ref} cannot {action} {resource}"
-                )
+                raise PermissionDenied(f"Denied: {actor_ref} cannot {action} {resource}")
             return fn(*args, **kwargs)
 
         return _wrapped

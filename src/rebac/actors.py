@@ -7,12 +7,14 @@ should only be invoked at framework boundaries.
 Per-queryset actors take strict priority over the ContextVar. See
 ARCHITECTURE.md § Three actor-resolution paths.
 """
+
 from __future__ import annotations
 
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
 from importlib import import_module
-from typing import Any, Callable, Iterator, Protocol, Union
+from typing import Any, Protocol
 
 from django.contrib.auth import get_user_model
 
@@ -23,7 +25,6 @@ from .errors import (
     SudoReasonRequiredError,
 )
 from .types import ObjectRef, SubjectRef
-
 
 # ---------- ContextVar ----------
 
@@ -56,6 +57,7 @@ def current_sudo_reason() -> str | None:
 
 # ---------- Subject conversion ----------
 
+
 class _RebacSubjectMarker(Protocol):
     """Anything decorated with @rebac_subject exposes _rebac_type and _rebac_id_attr."""
 
@@ -63,7 +65,7 @@ class _RebacSubjectMarker(Protocol):
     _rebac_id_attr: str
 
 
-ActorLike = Union[SubjectRef, _RebacSubjectMarker, Any]
+ActorLike = SubjectRef | _RebacSubjectMarker | Any
 """Anything resolvable to a `SubjectRef`.
 
 Concretely accepts:
@@ -111,9 +113,7 @@ def to_subject_ref(actor: ActorLike) -> SubjectRef:
         if not getattr(actor, "is_authenticated", False):
             raise NoActorResolvedError("AnonymousUser cannot be a SubjectRef")
         attr = subject_id_attr(user_model)
-        return SubjectRef.of(
-            app_settings.REBAC_USER_TYPE, str(getattr(actor, attr))
-        )
+        return SubjectRef.of(app_settings.REBAC_USER_TYPE, str(getattr(actor, attr)))
 
     # Group?
     try:
@@ -167,6 +167,7 @@ def grant_subject_ref(agent: Any, on_behalf_of: Any | None) -> SubjectRef:
 
 # ---------- sudo / system_context ----------
 
+
 @contextmanager
 def actor_context(actor: ActorLike) -> Iterator[None]:
     """Block-scoped ambient actor. Usually you want `.with_actor(actor)` on a
@@ -190,8 +191,7 @@ def sudo(*, reason: str | None = None) -> Iterator[None]:
         raise SudoNotAllowedError("sudo() denied: REBAC_ALLOW_SUDO is False")
     if app_settings.REBAC_REQUIRE_SUDO_REASON and not reason:
         raise SudoReasonRequiredError(
-            "sudo() requires a `reason=...` argument when "
-            "REBAC_REQUIRE_SUDO_REASON is True"
+            "sudo() requires a `reason=...` argument when REBAC_REQUIRE_SUDO_REASON is True"
         )
     state = {"reason": reason or ""}
     token = _sudo_state.set(state)
@@ -206,6 +206,7 @@ system_context = sudo  # alias, idiomatic for cron / migrations
 
 
 # ---------- Default resolver ----------
+
 
 def default_resolver(request: Any) -> SubjectRef | None:
     """Default `request → SubjectRef` resolver. Used by `ActorMiddleware`.

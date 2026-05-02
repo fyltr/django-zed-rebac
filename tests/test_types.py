@@ -1,4 +1,5 @@
 """Smoke tests for core types."""
+
 from __future__ import annotations
 
 import pytest

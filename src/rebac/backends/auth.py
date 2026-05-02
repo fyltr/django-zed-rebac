@@ -1,4 +1,5 @@
 """RebacBackend — Django auth backend that routes per-object `has_perm` through REBAC."""
+
 from __future__ import annotations
 
 from typing import Any
@@ -29,10 +30,10 @@ class RebacBackend:
         if action is None:
             return False
 
-        from . import backend
         from ..actors import to_subject_ref
         from ..errors import NoActorResolvedError
         from ..resources import to_object_ref
+        from . import backend
 
         try:
             subject = to_subject_ref(user_obj)

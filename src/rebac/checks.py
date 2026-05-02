@@ -1,4 +1,5 @@
 """System checks — registered at app-ready. No DB queries; no model instantiation."""
+
 from __future__ import annotations
 
 from typing import Any
@@ -23,16 +24,14 @@ def check_backend_setting(app_configs: Any = None, **kwargs: Any) -> list[checks
         if not app_settings.REBAC_SPICEDB_ENDPOINT:
             issues.append(
                 checks.Error(
-                    "REBAC_SPICEDB_ENDPOINT must be set when "
-                    "REBAC_BACKEND='spicedb'",
+                    "REBAC_SPICEDB_ENDPOINT must be set when REBAC_BACKEND='spicedb'",
                     id="rebac.E002",
                 )
             )
         if not app_settings.REBAC_SPICEDB_TOKEN:
             issues.append(
                 checks.Error(
-                    "REBAC_SPICEDB_TOKEN must be set when "
-                    "REBAC_BACKEND='spicedb'",
+                    "REBAC_SPICEDB_TOKEN must be set when REBAC_BACKEND='spicedb'",
                     id="rebac.E002",
                 )
             )
@@ -42,10 +41,7 @@ def check_backend_setting(app_configs: Any = None, **kwargs: Any) -> list[checks
 @checks.register("rebac", deploy=True)
 def check_production_settings(app_configs: Any = None, **kwargs: Any) -> list[checks.CheckMessage]:
     issues: list[checks.CheckMessage] = []
-    if (
-        app_settings.REBAC_BACKEND == "spicedb"
-        and not app_settings.REBAC_SPICEDB_TLS
-    ):
+    if app_settings.REBAC_BACKEND == "spicedb" and not app_settings.REBAC_SPICEDB_TLS:
         issues.append(
             checks.Warning(
                 "REBAC_SPICEDB_TLS=False in production. Set to True for "
@@ -64,10 +60,7 @@ def check_auth_backend_installed(
     from django.conf import settings
 
     backends = getattr(settings, "AUTHENTICATION_BACKENDS", [])
-    if not any(
-        b.endswith(".RebacBackend") or b.endswith(".auth.RebacBackend")
-        for b in backends
-    ):
+    if not any(b.endswith(".RebacBackend") or b.endswith(".auth.RebacBackend") for b in backends):
         return [
             checks.Warning(
                 "rebac.backends.auth.RebacBackend not in AUTHENTICATION_BACKENDS. "

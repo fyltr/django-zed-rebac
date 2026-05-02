@@ -1,4 +1,5 @@
 """Tests for codename → action mapping."""
+
 from __future__ import annotations
 
 import pytest

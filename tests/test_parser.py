@@ -1,4 +1,5 @@
 """Tests for the .zed schema parser."""
+
 from __future__ import annotations
 
 import pytest
@@ -13,7 +14,6 @@ from rebac.schema import (
     validate_schema,
 )
 from rebac.schema.parser import ParseError
-
 
 SAMPLE = """
 // @rebac_package: blog

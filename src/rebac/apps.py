@@ -1,4 +1,5 @@
 """App configuration. Two lines in ready() per spec — no queries, no I/O."""
+
 from __future__ import annotations
 
 from django.apps import AppConfig
@@ -13,5 +14,7 @@ class RebacConfig(AppConfig):
 
     def ready(self) -> None:
         # Connect signal handlers + register system checks. No DB queries here.
-        from . import checks  # noqa: F401  — side-effect: register checks
-        from . import signals  # noqa: F401  — side-effect: connect handlers
+        from . import (
+            checks,  # noqa: F401  — side-effect: register checks
+            signals,  # noqa: F401  — side-effect: connect handlers
+        )

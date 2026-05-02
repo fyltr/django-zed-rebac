@@ -1,11 +1,12 @@
 """Resource registry: `@rebac_resource` decorator and `to_object_ref` resolver."""
+
 from __future__ import annotations
 
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 from .conf import app_settings
 from .types import ObjectRef
-
 
 _resource_registry: dict[type, tuple[str, str]] = {}
 """Mapping `cls -> (rebac_type, id_attr)` populated by `@rebac_resource`."""

@@ -1,4 +1,5 @@
 """SpiceDB-native .zed schema parser + AST + compiler."""
+
 from __future__ import annotations
 
 from .ast import (
@@ -6,10 +7,10 @@ from .ast import (
     Caveat,
     CaveatParam,
     Definition,
-    Permission,
-    PermExpr,
     PermArrow,
     PermBinOp,
+    PermExpr,
+    Permission,
     PermNil,
     PermRef,
     Relation,
@@ -18,20 +19,21 @@ from .ast import (
 from .parser import ParseError, parse_permission_expression, parse_zed, validate_schema
 
 __all__ = [
-    "Schema",
-    "Definition",
-    "Relation",
     "AllowedSubject",
-    "Permission",
-    "PermExpr",
-    "PermBinOp",
-    "PermArrow",
-    "PermRef",
-    "PermNil",
     "Caveat",
     "CaveatParam",
-    "parse_zed",
-    "parse_permission_expression",
-    "validate_schema",
+    "Definition",
     "ParseError",
+    "PermArrow",
+    "PermBinOp",
+    "PermExpr",
+    "PermNil",
+    "PermRef",
+    "Permission",
+    "Relation",
+    "Schema",
+    "parse_permission_expression",
+    "parse_permission_expression",
+    "parse_zed",
+    "validate_schema",
 ]

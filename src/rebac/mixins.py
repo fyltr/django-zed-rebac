@@ -6,6 +6,7 @@ reject it as an unknown Meta option). The value is stored as
 `<Model>._meta.rebac_resource_type` after class creation, so callers continue
 to read it as a Meta attribute even though Django itself doesn't track it.
 """
+
 from __future__ import annotations
 
 from typing import Any
@@ -14,7 +15,6 @@ from django.db import models
 from django.db.models.base import ModelBase
 
 from .managers import RebacManager
-
 
 _RECOGNISED_META = (
     "rebac_resource_type",
@@ -69,5 +69,5 @@ class RebacMixin(models.Model, metaclass=RebacModelBase):
         abstract = True
 
     @classmethod
-    def from_db(cls, db: Any, field_names: Any, values: Any) -> "RebacMixin":
+    def from_db(cls, db: Any, field_names: Any, values: Any) -> RebacMixin:
         return super().from_db(db, field_names, values)

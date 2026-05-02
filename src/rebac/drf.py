@@ -4,13 +4,14 @@ Soft-imports `rest_framework` so the module can be imported without DRF
 installed. Importing the names from this module raises `ImportError` only
 when DRF is missing AND the names are actually used.
 """
+
 from __future__ import annotations
 
 from typing import Any
 
 try:
-    from rest_framework import permissions as _drf_perms
     from rest_framework import filters as _drf_filters
+    from rest_framework import permissions as _drf_perms
 
     _HAS_DRF = True
 except ImportError:  # pragma: no cover
@@ -118,13 +119,11 @@ else:  # pragma: no cover
     class RebacPermission:  # type: ignore[no-redef]
         def __init__(self, *args: Any, **kwargs: Any) -> None:
             raise ImportError(
-                "RebacPermission requires djangorestframework. "
-                "pip install django-zed-rebac[drf]"
+                "RebacPermission requires djangorestframework. pip install django-zed-rebac[drf]"
             )
 
     class RebacFilterBackend:  # type: ignore[no-redef]
         def __init__(self, *args: Any, **kwargs: Any) -> None:
             raise ImportError(
-                "RebacFilterBackend requires djangorestframework. "
-                "pip install django-zed-rebac[drf]"
+                "RebacFilterBackend requires djangorestframework. pip install django-zed-rebac[drf]"
             )

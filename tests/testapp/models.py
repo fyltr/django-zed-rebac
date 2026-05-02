@@ -1,4 +1,5 @@
 """Synthetic models for testing the mixin."""
+
 from __future__ import annotations
 
 from django.db import models

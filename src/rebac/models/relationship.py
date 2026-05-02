@@ -2,6 +2,7 @@
 
 Wire-shape mirrors `authzed.api.v1.Relationship` exactly. Renames are breaking.
 """
+
 from __future__ import annotations
 
 from django.db import models

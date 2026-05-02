@@ -1,4 +1,5 @@
 """pytest-django configuration."""
+
 from __future__ import annotations
 
 import django

@@ -3,6 +3,7 @@
 Borrowed from Odoo 18's `ir.model.data`. Tracks which package shipped which
 schema row with `noupdate` semantics that preserve admin edits across upgrades.
 """
+
 from __future__ import annotations
 
 from django.contrib.contenttypes.fields import GenericForeignKey

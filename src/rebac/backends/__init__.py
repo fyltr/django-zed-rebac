@@ -3,9 +3,8 @@
 `backend()` returns the singleton instance configured by `REBAC_BACKEND`.
 The first call instantiates; subsequent calls return the cached instance.
 """
-from __future__ import annotations
 
-from typing import Optional
+from __future__ import annotations
 
 from ..conf import app_settings
 from .auth import RebacBackend
@@ -13,8 +12,7 @@ from .base import Backend
 from .local import LocalBackend
 from .spicedb import SpiceDBBackend
 
-
-_backend: Optional[Backend] = None
+_backend: Backend | None = None
 
 
 def backend() -> Backend:
@@ -32,9 +30,7 @@ def backend() -> Backend:
     elif kind == "spicedb":
         _backend = SpiceDBBackend()
     else:
-        raise ValueError(
-            f"Unknown REBAC_BACKEND={kind!r} (expected 'local' or 'spicedb')"
-        )
+        raise ValueError(f"Unknown REBAC_BACKEND={kind!r} (expected 'local' or 'spicedb')")
     return _backend
 
 

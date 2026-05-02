@@ -1,4 +1,5 @@
 """PermissionAuditEvent — append-only audit log."""
+
 from __future__ import annotations
 
 from django.db import models
@@ -35,5 +36,9 @@ class PermissionAuditEvent(models.Model):
         ordering = ["-occurred_at"]
 
     def __str__(self) -> str:
-        actor = f"{self.actor_subject_type}:{self.actor_subject_id}" if self.actor_subject_type else "<system>"
+        actor = (
+            f"{self.actor_subject_type}:{self.actor_subject_id}"
+            if self.actor_subject_type
+            else "<system>"
+        )
         return f"[{self.kind}] {actor} → {self.target_repr}"

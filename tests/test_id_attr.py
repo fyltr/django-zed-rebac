@@ -223,9 +223,7 @@ def test_manager_filters_by_meta_attr_when_set():
 
     _grant_owner(user, "blog/sluggedpost", "visible")
 
-    visible = list(
-        SluggedPost.objects.with_actor(user).values_list("slug", flat=True)
-    )
+    visible = list(SluggedPost.objects.with_actor(user).values_list("slug", flat=True))
     assert visible == ["visible"]
 
 
@@ -237,9 +235,7 @@ def test_manager_filters_by_meta_attr_when_set():
 def _make_user(username: str):
     from django.contrib.auth import get_user_model
 
-    return get_user_model().objects.create(
-        username=username, is_active=True
-    )
+    return get_user_model().objects.create(username=username, is_active=True)
 
 
 def _grant_owner_pk(user, instance, resource_type: str) -> None:

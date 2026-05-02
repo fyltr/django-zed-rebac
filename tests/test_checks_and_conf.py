@@ -1,4 +1,5 @@
 """Tests for system checks and settings cache behavior."""
+
 from __future__ import annotations
 
 from django.core import checks

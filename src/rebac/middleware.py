@@ -1,7 +1,9 @@
 """ActorMiddleware — populates `current_actor()` from `request.user`."""
+
 from __future__ import annotations
 
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 from .actors import _current_actor, get_actor_resolver
 

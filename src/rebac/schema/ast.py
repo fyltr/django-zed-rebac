@@ -9,10 +9,11 @@ The expression operators bind in this order (per SpiceDB):
 The compiler always emits explicit parentheses for compound expressions —
 single-line schema fragments without parens are a footgun even when they parse.
 """
+
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass, field
-from typing import Optional, Sequence
 
 
 @dataclass(frozen=True, slots=True)
@@ -20,9 +21,9 @@ class AllowedSubject:
     """One subject type in a relation's type union."""
 
     type: str
-    relation: str = ""        # subject set, e.g. group#member
-    wildcard: bool = False    # `auth/user:*`
-    with_caveat: str = ""     # caveat the subject is bound by
+    relation: str = ""  # subject set, e.g. group#member
+    wildcard: bool = False  # `auth/user:*`
+    with_caveat: str = ""  # caveat the subject is bound by
 
 
 @dataclass(frozen=True, slots=True)
@@ -33,6 +34,7 @@ class Relation:
 
 
 # ---------- Permission expression AST ----------
+
 
 @dataclass(frozen=True, slots=True)
 class PermRef:
@@ -45,17 +47,17 @@ class PermRef:
 class PermArrow:
     """`relation->permission` — walk through `relation`, evaluate `permission` there."""
 
-    via: str          # the relation to walk
-    target: str       # the permission to check on the target
+    via: str  # the relation to walk
+    target: str  # the permission to check on the target
 
 
 @dataclass(frozen=True, slots=True)
 class PermBinOp:
     """`+` (union), `&` (intersection), `-` (exclusion)."""
 
-    op: str          # "+" | "&" | "-"
-    left: "PermExpr"
-    right: "PermExpr"
+    op: str  # "+" | "&" | "-"
+    left: PermExpr
+    right: PermExpr
 
 
 @dataclass(frozen=True, slots=True)
@@ -75,6 +77,7 @@ class Permission:
 
 # ---------- Caveat AST ----------
 
+
 @dataclass(frozen=True, slots=True)
 class CaveatParam:
     name: str
@@ -85,10 +88,11 @@ class CaveatParam:
 class Caveat:
     name: str
     params: tuple[CaveatParam, ...]
-    expression: str   # raw CEL — evaluation is the backend's job
+    expression: str  # raw CEL — evaluation is the backend's job
 
 
 # ---------- Definition / Schema ----------
+
 
 @dataclass(frozen=True, slots=True)
 class Definition:
@@ -106,7 +110,7 @@ class Schema:
     directives: list[str] = field(default_factory=list)
     headers: dict[str, str] = field(default_factory=dict)
 
-    def get_definition(self, resource_type: str) -> Optional[Definition]:
+    def get_definition(self, resource_type: str) -> Definition | None:
         for d in self.definitions:
             if d.resource_type == resource_type:
                 return d
@@ -116,7 +120,7 @@ class Schema:
         d = self.get_definition(resource_type)
         return d.relations if d else ()
 
-    def get_permission(self, resource_type: str, name: str) -> Optional[Permission]:
+    def get_permission(self, resource_type: str, name: str) -> Permission | None:
         d = self.get_definition(resource_type)
         if not d:
             return None
@@ -125,7 +129,7 @@ class Schema:
                 return p
         return None
 
-    def get_caveat(self, name: str) -> Optional[Caveat]:
+    def get_caveat(self, name: str) -> Caveat | None:
         for c in self.caveats:
             if c.name == name:
                 return c
