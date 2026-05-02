@@ -54,12 +54,17 @@ if TYPE_CHECKING:
     from .backends import Backend, LocalBackend, SpiceDBBackend
     from .decorators import rebac_resource, require_permission
     from .mixins import RebacMixin
+    from .permissions_mixin import RebacPermissionsMixin
     from .relationships import delete_relationships, write_relationships
     from .resources import to_object_ref
 
 
 _LAZY = {
     "RebacMixin": ("rebac.mixins", "RebacMixin"),
+    "RebacPermissionsMixin": (
+        "rebac.permissions_mixin",
+        "RebacPermissionsMixin",
+    ),
     "Backend": ("rebac.backends", "Backend"),
     "LocalBackend": ("rebac.backends", "LocalBackend"),
     "SpiceDBBackend": ("rebac.backends", "SpiceDBBackend"),
@@ -94,6 +99,7 @@ __all__ = [
     "RelationshipTuple",
     # mixin / managers
     "RebacMixin",
+    "RebacPermissionsMixin",
     # decorators
     "require_permission",
     "rebac_resource",
