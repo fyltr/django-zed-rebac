@@ -25,7 +25,9 @@ class PackageManagedRecord(models.Model):
     class Meta:
         app_label = "rebac"
         unique_together = [("package", "external_id")]
-        indexes = [models.Index(fields=["target_ct", "target_pk"])]
+        indexes = [
+            models.Index(fields=["target_ct", "target_pk"], name="rebac_pmr_target_idx"),
+        ]
 
     def __str__(self) -> str:
         return f"{self.package}:{self.external_id}"

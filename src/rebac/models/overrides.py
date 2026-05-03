@@ -37,7 +37,9 @@ class SchemaOverride(models.Model):
 
     class Meta:
         app_label = "rebac"
-        indexes = [models.Index(fields=["target_ct", "target_pk"])]
+        indexes = [
+            models.Index(fields=["target_ct", "target_pk"], name="rebac_ovr_target_idx"),
+        ]
 
     def __str__(self) -> str:
         return f"{self.kind}:{self.target_ct}/{self.target_pk}"

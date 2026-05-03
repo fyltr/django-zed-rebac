@@ -53,7 +53,7 @@ from .types import (
 if TYPE_CHECKING:
     from .backends import Backend, LocalBackend, SpiceDBBackend
     from .decorators import rebac_resource, require_permission
-    from .mixins import RebacMixin
+    from .mixins import RebacMixin, RebacObjectMeta
     from .permissions_mixin import RebacPermissionsMixin
     from .relationships import delete_relationships, write_relationships
     from .resources import to_object_ref
@@ -61,6 +61,7 @@ if TYPE_CHECKING:
 
 _LAZY = {
     "RebacMixin": ("rebac.mixins", "RebacMixin"),
+    "RebacObjectMeta": ("rebac.mixins", "RebacObjectMeta"),
     "RebacPermissionsMixin": (
         "rebac.permissions_mixin",
         "RebacPermissionsMixin",
@@ -97,8 +98,9 @@ __all__ = [
     "Consistency",
     "Zookie",
     "RelationshipTuple",
-    # mixin / managers
+    # mixin / managers / metaclasses
     "RebacMixin",
+    "RebacObjectMeta",
     "RebacPermissionsMixin",
     # decorators
     "require_permission",
