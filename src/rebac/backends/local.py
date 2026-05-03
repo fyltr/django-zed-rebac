@@ -85,9 +85,11 @@ class LocalBackend(Backend):
         return self._schema
 
     def _load_schema_from_db(self) -> Schema:
+        from ..composition import compose
         from ..models import (
             SchemaCaveat,
             SchemaDefinition,
+            SchemaOverride,
         )
         from ..schema.ast import (
             Caveat,
@@ -126,7 +128,14 @@ class LocalBackend(Backend):
             params = tuple(CaveatParam(p["name"], p["type"]) for p in (c.params or []))
             caveats.append(Caveat(c.name, params, c.expression))
 
-        return Schema(definitions=defs, caveats=caveats)
+        baseline = Schema(definitions=defs, caveats=caveats)
+
+        # Tier-2: apply SchemaOverride composition. `compose()` is the
+        # single source of determinism (it re-sorts disables by
+        # (created_at, pk) per kind), so the loader-side order_by is just
+        # cosmetic; we keep it for readable EXPLAIN plans.
+        overrides = list(SchemaOverride.objects.all().order_by("kind", "created_at", "pk"))
+        return compose(baseline, overrides)
 
     # ---------- Public API ----------
 

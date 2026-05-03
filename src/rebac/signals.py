@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Iterable
 from typing import Any
 
-from django.db.models.signals import pre_delete, pre_save
+from django.db.models.signals import post_delete, post_save, pre_delete, pre_save
 from django.dispatch import receiver
 
 from ._id import resource_id_attr
@@ -268,3 +268,87 @@ def _dirty_field_names(
         elif loaded[attname] != current:
             dirty.append(field.name)
     return dirty
+
+
+# ---------------------------------------------------------------------------
+# SchemaOverride invalidation + audit
+# ---------------------------------------------------------------------------
+#
+# Tier-2 override CRUD must reset the cached backend so the next permission
+# check rebuilds the in-memory schema with composition applied. Each create
+# or delete emits a PermissionAuditEvent via the single audit-emission
+# helper. Single-process only — multi-process LISTEN/NOTIFY is a v1.x
+# roadmap item.
+
+
+def _override_target_repr(instance: Any) -> str:
+    """Best-effort string repr of the override target for audit rows."""
+    from django.contrib.contenttypes.models import ContentType
+
+    try:
+        ct = instance.target_ct
+        return f"{instance.kind}:{ct.app_label}.{ct.model}/{instance.target_pk}"
+    except ContentType.DoesNotExist:
+        return f"{getattr(instance, 'kind', '?')}:?/{getattr(instance, 'target_pk', '?')}"
+
+
+def _override_payload(instance: Any) -> dict[str, Any]:
+    return {
+        "kind": getattr(instance, "kind", ""),
+        "expression": getattr(instance, "expression", ""),
+        "reason": getattr(instance, "reason", ""),
+    }
+
+
+def _emit_override_audit(
+    *, kind: str, instance: Any, before: dict[str, Any] | None, after: dict[str, Any] | None
+) -> None:
+    """Emit an override.* PermissionAuditEvent via the single emission point."""
+    from .audit import emit as emit_audit
+
+    actor = _current_actor()
+    emit_audit(
+        kind,
+        actor=actor,
+        origin=actor,
+        target_repr=_override_target_repr(instance),
+        before=before,
+        after=after,
+        reason=getattr(instance, "reason", "") or "",
+        defer_to_commit=True,
+    )
+
+
+@receiver(post_save, sender="rebac.SchemaOverride")
+def _rebac_override_post_save(
+    sender: type, instance: Any, created: bool, raw: bool = False, **_: Any
+) -> None:
+    if raw:
+        return
+    from .backends import reset_backend
+    from .models import PermissionAuditEvent
+
+    reset_backend()
+    if created:
+        _emit_override_audit(
+            kind=PermissionAuditEvent.KIND_OVERRIDE_CREATE,
+            instance=instance,
+            before=None,
+            after=_override_payload(instance),
+        )
+    # Updates to existing overrides aren't separately audited in v1; treat
+    # them as configuration drift and rely on the underlying admin log.
+
+
+@receiver(post_delete, sender="rebac.SchemaOverride")
+def _rebac_override_post_delete(sender: type, instance: Any, **_: Any) -> None:
+    from .backends import reset_backend
+    from .models import PermissionAuditEvent
+
+    reset_backend()
+    _emit_override_audit(
+        kind=PermissionAuditEvent.KIND_OVERRIDE_DELETE,
+        instance=instance,
+        before=_override_payload(instance),
+        after=None,
+    )
