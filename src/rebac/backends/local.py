@@ -74,9 +74,11 @@ class LocalBackend(Backend):
         return self._schema
 
     def _load_schema_from_db(self) -> Schema:
+        from ..composition import compose
         from ..models import (
             SchemaCaveat,
             SchemaDefinition,
+            SchemaOverride,
         )
         from ..schema.ast import (
             Caveat,
@@ -115,7 +117,13 @@ class LocalBackend(Backend):
             params = tuple(CaveatParam(p["name"], p["type"]) for p in (c.params or []))
             caveats.append(Caveat(c.name, params, c.expression))
 
-        return Schema(definitions=defs, caveats=caveats)
+        baseline = Schema(definitions=defs, caveats=caveats)
+
+        # Tier-2: apply SchemaOverride composition. Deterministic order --
+        # subtraction is non-commutative, so the loader pins overrides to a
+        # stable (kind, created_at, pk) order before handing them to compose().
+        overrides = list(SchemaOverride.objects.all().order_by("kind", "created_at", "pk"))
+        return compose(baseline, overrides)
 
     # ---------- Public API ----------
 

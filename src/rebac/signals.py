@@ -4,7 +4,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from django.db.models.signals import pre_delete, pre_save
+from django.db import transaction
+from django.db.models.signals import post_delete, post_save, pre_delete, pre_save
 from django.dispatch import receiver
 
 from ._id import resource_id_attr
@@ -83,3 +84,101 @@ def _rebac_pre_delete(sender: type, instance: Any, using: Any = None, **_: Any) 
     result = backend().check_access(subject=actor, action="delete", resource=resource)
     if not result.allowed:
         raise PermissionDenied(f"Denied: {actor} cannot delete {resource}")
+
+
+# ---------------------------------------------------------------------------
+# SchemaOverride invalidation + audit
+# ---------------------------------------------------------------------------
+#
+# Tier-2 override CRUD must reset the cached backend so the next permission
+# check rebuilds the in-memory schema with composition applied. Each create
+# or delete also writes a PermissionAuditEvent. Single-process only —
+# multi-process LISTEN/NOTIFY is a v1.x roadmap item.
+
+
+def _override_target_repr(instance: Any) -> str:
+    try:
+        return f"{instance.kind}:{instance.target_ct.app_label}.{instance.target_ct.model}/{instance.target_pk}"
+    except Exception:
+        return f"{getattr(instance, 'kind', '?')}:?/{getattr(instance, 'target_pk', '?')}"
+
+
+def _override_payload(instance: Any) -> dict[str, Any]:
+    return {
+        "kind": getattr(instance, "kind", ""),
+        "expression": getattr(instance, "expression", ""),
+        "reason": getattr(instance, "reason", ""),
+    }
+
+
+def _emit_override_audit(*, kind: str, instance: Any, before: Any, after: Any) -> None:
+    """Write an override.* PermissionAuditEvent. Deferred to commit."""
+    # Local imports — avoid circulars and keep app boot light.
+    from .models import PermissionAuditEvent
+
+    actor = _current_actor()
+    actor_type = actor.subject_type if actor else ""
+    actor_id = actor.subject_id if actor else ""
+    target_repr = _override_target_repr(instance)
+    reason = getattr(instance, "reason", "") or ""
+
+    def _do_create() -> None:
+        PermissionAuditEvent.objects.create(
+            kind=kind,
+            actor_subject_type=actor_type,
+            actor_subject_id=actor_id,
+            target_repr=target_repr,
+            before=before,
+            after=after,
+            reason=reason,
+        )
+
+    # Best-effort defer to commit; outside an atomic block on_commit fires
+    # immediately. If something later in the test rolls back the outer
+    # transaction the audit row goes with it — that's the right semantics
+    # (no audit for events that didn't happen).
+    try:
+        transaction.on_commit(_do_create)
+    except Exception:
+        # No DB / no connection — emit synchronously.
+        _do_create()
+
+
+@receiver(post_save, sender="rebac.SchemaOverride")
+def _rebac_override_post_save(
+    sender: type, instance: Any, created: bool, raw: bool = False, **_: Any
+) -> None:
+    if raw:
+        return
+    # Reset the cached backend so the next check picks up the new override.
+    from .backends import reset_backend
+
+    reset_backend()
+
+    from .models import PermissionAuditEvent
+
+    if created:
+        _emit_override_audit(
+            kind=PermissionAuditEvent.KIND_OVERRIDE_CREATE,
+            instance=instance,
+            before=None,
+            after=_override_payload(instance),
+        )
+    # Updates to existing overrides aren't separately audited in v1; treat
+    # them as configuration drift and rely on the underlying admin log.
+
+
+@receiver(post_delete, sender="rebac.SchemaOverride")
+def _rebac_override_post_delete(sender: type, instance: Any, **_: Any) -> None:
+    from .backends import reset_backend
+
+    reset_backend()
+
+    from .models import PermissionAuditEvent
+
+    _emit_override_audit(
+        kind=PermissionAuditEvent.KIND_OVERRIDE_DELETE,
+        instance=instance,
+        before=_override_payload(instance),
+        after=None,
+    )
