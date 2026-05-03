@@ -127,7 +127,20 @@ class RebacMixin(models.Model, metaclass=RebacModelBase):
       - `_default_manager` points at it; `_base_manager` left unfiltered (Django
         uses base manager for FK reverse caching / M2M intermediates).
       - Pre-save / pre-delete signal handlers gate writes (wired in `signals.py`).
-      - `from_db()` override propagates the queryset's actor onto loaded instances.
+      - `from_db()` override propagates the queryset's actor onto loaded
+        instances and snapshots loaded field values into
+        ``_rebac_loaded_values`` for later dirty-field computation
+        (per-field ``write__<f>`` enforcement; see ``signals.py``).
+
+    Pickle / cross-process posture:
+      ``__getstate__`` strips ``_rebac_actor``, ``_rebac_sudo_reason``, and
+      ``_rebac_loaded_values`` before pickling. Instances crossing
+      process / wire boundaries (e.g. ``apply_async(args=[instance])``)
+      lose their pinned actor and sudo binding; the receiving worker MUST
+      re-attach an actor via middleware / Celery hook before saving. This
+      is fail-closed by design — actor identity must be re-asserted at
+      every trust boundary, never silently inherited from a serialised
+      blob.
     """
 
     objects = RebacManager()
@@ -140,4 +153,43 @@ class RebacMixin(models.Model, metaclass=RebacModelBase):
 
     @classmethod
     def from_db(cls, db: Any, field_names: Any, values: Any) -> RebacMixin:
-        return super().from_db(db, field_names, values)
+        """Instantiate from a row + snapshot loaded field values.
+
+        The snapshot lives on ``instance._rebac_loaded_values`` and powers
+        per-field write gates: ``signals.py`` compares it against the
+        current values to detect dirty fields, then re-checks each one
+        against ``write__<field>`` if such a permission is declared.
+
+        Deferred fields are skipped (they aren't in ``field_names``); a
+        subsequent ``refresh_from_db`` does NOT update the snapshot — that
+        would defeat the audit purpose of "what was on the row when the
+        actor first loaded it". Pure in-memory; no extra queries.
+        """
+        from django.db.models import DEFERRED
+
+        instance = super().from_db(db, field_names, values)
+        # field_names is parallel to values; both are the attnames Django loaded.
+        snapshot: dict[str, Any] = {}
+        for name, value in zip(field_names, values, strict=False):
+            if value is DEFERRED:
+                continue
+            snapshot[name] = value
+        instance._rebac_loaded_values = snapshot
+        return instance
+
+    def __getstate__(self) -> dict[str, Any]:
+        """Strip per-instance REBAC binding before pickling.
+
+        Removes ``_rebac_actor``, ``_rebac_sudo_reason``, and
+        ``_rebac_loaded_values`` so a pickled instance cannot smuggle a
+        trusted actor across a process boundary. The receiving end must
+        re-attach an actor via middleware / Celery hook (see
+        ``CLAUDE.md § 5`` — actor lives on the queryset / instance, not
+        in a ContextVar that survives pickling).
+        """
+        state = super().__getstate__()
+        if isinstance(state, dict):
+            state.pop("_rebac_actor", None)
+            state.pop("_rebac_sudo_reason", None)
+            state.pop("_rebac_loaded_values", None)
+        return state
