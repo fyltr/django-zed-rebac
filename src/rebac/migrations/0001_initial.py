@@ -17,7 +17,15 @@ class Migration(migrations.Migration):
         migrations.CreateModel(
             name="Relationship",
             fields=[
-                ("id", models.BigAutoField(auto_created=True, primary_key=True, serialize=False)),
+                (
+                    "id",
+                    models.BigAutoField(
+                        auto_created=True,
+                        primary_key=True,
+                        serialize=False,
+                        verbose_name="ID",
+                    ),
+                ),
                 ("resource_type", models.CharField(db_index=True, max_length=64)),
                 ("resource_id", models.CharField(db_index=True, max_length=64)),
                 ("relation", models.CharField(db_index=True, max_length=64)),
@@ -74,14 +82,30 @@ class Migration(migrations.Migration):
         migrations.CreateModel(
             name="SchemaDefinition",
             fields=[
-                ("id", models.BigAutoField(auto_created=True, primary_key=True, serialize=False)),
+                (
+                    "id",
+                    models.BigAutoField(
+                        auto_created=True,
+                        primary_key=True,
+                        serialize=False,
+                        verbose_name="ID",
+                    ),
+                ),
                 ("resource_type", models.CharField(max_length=64, unique=True)),
             ],
         ),
         migrations.CreateModel(
             name="SchemaRelation",
             fields=[
-                ("id", models.BigAutoField(auto_created=True, primary_key=True, serialize=False)),
+                (
+                    "id",
+                    models.BigAutoField(
+                        auto_created=True,
+                        primary_key=True,
+                        serialize=False,
+                        verbose_name="ID",
+                    ),
+                ),
                 ("name", models.CharField(max_length=64)),
                 ("allowed_subjects", models.JSONField(default=list)),
                 ("caveat", models.CharField(blank=True, default="", max_length=64)),
@@ -100,7 +124,15 @@ class Migration(migrations.Migration):
         migrations.CreateModel(
             name="SchemaPermission",
             fields=[
-                ("id", models.BigAutoField(auto_created=True, primary_key=True, serialize=False)),
+                (
+                    "id",
+                    models.BigAutoField(
+                        auto_created=True,
+                        primary_key=True,
+                        serialize=False,
+                        verbose_name="ID",
+                    ),
+                ),
                 ("name", models.CharField(max_length=64)),
                 ("expression", models.TextField()),
                 (
@@ -117,7 +149,15 @@ class Migration(migrations.Migration):
         migrations.CreateModel(
             name="SchemaCaveat",
             fields=[
-                ("id", models.BigAutoField(auto_created=True, primary_key=True, serialize=False)),
+                (
+                    "id",
+                    models.BigAutoField(
+                        auto_created=True,
+                        primary_key=True,
+                        serialize=False,
+                        verbose_name="ID",
+                    ),
+                ),
                 ("name", models.CharField(max_length=64, unique=True)),
                 ("params", models.JSONField(default=list)),
                 ("expression", models.TextField()),
@@ -126,7 +166,15 @@ class Migration(migrations.Migration):
         migrations.CreateModel(
             name="PackageManagedRecord",
             fields=[
-                ("id", models.BigAutoField(auto_created=True, primary_key=True, serialize=False)),
+                (
+                    "id",
+                    models.BigAutoField(
+                        auto_created=True,
+                        primary_key=True,
+                        serialize=False,
+                        verbose_name="ID",
+                    ),
+                ),
                 ("package", models.CharField(max_length=128)),
                 ("external_id", models.CharField(max_length=255)),
                 ("schema_revision", models.PositiveIntegerField()),
@@ -153,7 +201,15 @@ class Migration(migrations.Migration):
         migrations.CreateModel(
             name="SchemaOverride",
             fields=[
-                ("id", models.BigAutoField(auto_created=True, primary_key=True, serialize=False)),
+                (
+                    "id",
+                    models.BigAutoField(
+                        auto_created=True,
+                        primary_key=True,
+                        serialize=False,
+                        verbose_name="ID",
+                    ),
+                ),
                 (
                     "kind",
                     models.CharField(
@@ -197,7 +253,15 @@ class Migration(migrations.Migration):
         migrations.CreateModel(
             name="PermissionAuditEvent",
             fields=[
-                ("id", models.BigAutoField(auto_created=True, primary_key=True, serialize=False)),
+                (
+                    "id",
+                    models.BigAutoField(
+                        auto_created=True,
+                        primary_key=True,
+                        serialize=False,
+                        verbose_name="ID",
+                    ),
+                ),
                 (
                     "kind",
                     models.CharField(
