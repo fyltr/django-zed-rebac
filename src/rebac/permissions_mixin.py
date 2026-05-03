@@ -28,6 +28,15 @@ Pair with :class:`rebac.backends.auth.RebacBackend` (front-of-line in
 ``AUTHENTICATION_BACKENDS``) so ``user.has_perm(...)`` calls flow
 through the engine without hitting the now-empty
 ``Permission`` / ``Group`` M2Ms.
+
+Surface beyond the canonical contrib.auth methods:
+
+- :meth:`get_user_permissions` / :meth:`get_group_permissions` /
+  :meth:`get_all_permissions` aggregate codenames across every
+  configured backend — same shape as contrib.auth.
+- ``a*`` async siblings (``ahas_perm`` / ``aget_all_permissions`` /
+  …) for Django 4.1+ async views and DRF async pipelines. Backends
+  that don't ship the async sibling are skipped silently.
 """
 
 from __future__ import annotations
@@ -69,6 +78,62 @@ def _walk_backends(
     return False
 
 
+async def _awalk_backends(
+    method_name: str, *args: Any, **kwargs: Any
+) -> bool:
+    """Async sibling of :func:`_walk_backends`.
+
+    Backends that ship the ``a``-prefixed sibling get awaited; ones
+    that don't are skipped. Same ``PermissionDenied`` short-circuit.
+    """
+    for backend in get_backends():
+        method = getattr(backend, method_name, None)
+        if method is None:
+            continue
+        try:
+            if await method(*args, **kwargs):
+                return True
+        except PermissionDenied:
+            return False
+    return False
+
+
+def _walk_get_permissions(
+    user: Any, obj: Any, scope: str
+) -> set[str]:
+    """Aggregate permission codenames from every backend.
+
+    Mirrors ``django.contrib.auth.models._user_get_permissions``: do
+    NOT catch ``PermissionDenied`` here. ``has_perm`` short-circuits
+    on it (as the chain semantics require), but the *aggregator* must
+    return the union from every backend that contributed before the
+    raise — otherwise a denial from the first backend silently zeros
+    out everything later backends would have offered.
+    """
+    seen: set[str] = set()
+    method_name = f"get_{scope}_permissions"
+    for backend in get_backends():
+        fn = getattr(backend, method_name, None)
+        if fn is None:
+            continue
+        seen.update(fn(user, obj))
+    return seen
+
+
+async def _awalk_get_permissions(
+    user: Any, obj: Any, scope: str
+) -> set[str]:
+    """Async sibling of :func:`_walk_get_permissions`."""
+    seen: set[str] = set()
+    method_name = f"aget_{scope}_permissions"
+    for backend in get_backends():
+        fn = getattr(backend, method_name, None)
+        if fn is None:
+            continue
+        seen.update(await fn(user, obj))
+    return seen
+
+
 class RebacPermissionsMixin(models.Model):
     """Permission methods + ``is_superuser`` field, no M2Ms.
 
@@ -95,6 +160,20 @@ class RebacPermissionsMixin(models.Model):
 
     class Meta:
         abstract = True
+
+    # ---------- Permission lookups ----------
+
+    def get_user_permissions(self, obj: Any = None) -> set[str]:
+        """Codenames granted to the user directly across all backends."""
+        return _walk_get_permissions(self, obj, "user")
+
+    def get_group_permissions(self, obj: Any = None) -> set[str]:
+        """Codenames granted via the user's groups across all backends."""
+        return _walk_get_permissions(self, obj, "group")
+
+    def get_all_permissions(self, obj: Any = None) -> set[str]:
+        """Union of user + group codenames across all backends."""
+        return _walk_get_permissions(self, obj, "all")
 
     # ---------- has_perm / has_perms ----------
 
@@ -133,6 +212,49 @@ class RebacPermissionsMixin(models.Model):
         if self.is_active and self.is_superuser:
             return True
         return _walk_backends("has_module_perms", self, app_label)
+
+    # ---------- Async siblings (Django 4.1+) ----------
+
+    async def aget_user_permissions(
+        self, obj: Any = None
+    ) -> set[str]:
+        return await _awalk_get_permissions(self, obj, "user")
+
+    async def aget_group_permissions(
+        self, obj: Any = None
+    ) -> set[str]:
+        return await _awalk_get_permissions(self, obj, "group")
+
+    async def aget_all_permissions(
+        self, obj: Any = None
+    ) -> set[str]:
+        return await _awalk_get_permissions(self, obj, "all")
+
+    async def ahas_perm(self, perm: str, obj: Any = None) -> bool:
+        if self.is_active and self.is_superuser:
+            return True
+        return await _awalk_backends("ahas_perm", self, perm, obj)
+
+    async def ahas_perms(
+        self, perm_list: Iterable[str], obj: Any = None
+    ) -> bool:
+        if not isinstance(perm_list, Iterable) or isinstance(
+            perm_list, str
+        ):
+            raise ValueError(
+                "perm_list must be an iterable of permissions."
+            )
+        for perm in perm_list:
+            if not await self.ahas_perm(perm, obj):
+                return False
+        return True
+
+    async def ahas_module_perms(self, app_label: str) -> bool:
+        if self.is_active and self.is_superuser:
+            return True
+        return await _awalk_backends(
+            "ahas_module_perms", self, app_label
+        )
 
 
 __all__ = ["RebacPermissionsMixin"]

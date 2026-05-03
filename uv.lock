@@ -71,7 +71,7 @@ wheels = [
 
 [[package]]
 name = "django-zed-rebac"
-version = "0.1.1a0"
+version = "0.1.2a0"
 source = { editable = "." }
 dependencies = [
     { name = "django" },
