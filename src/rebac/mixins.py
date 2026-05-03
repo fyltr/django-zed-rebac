@@ -129,7 +129,10 @@ class RebacMixin(models.Model, metaclass=RebacModelBase):
       - `_default_manager` points at it; `_base_manager` left unfiltered (Django
         uses base manager for FK reverse caching / M2M intermediates).
       - Pre-save / pre-delete signal handlers gate writes (wired in `signals.py`).
-      - `from_db()` override propagates the queryset's actor onto loaded instances.
+      - ``from_db()`` propagates the queryset's actor onto loaded instances
+        and snapshots loaded field values into ``_rebac_loaded_values`` for
+        later dirty-field computation (per-field ``write__<f>`` enforcement;
+        see ``signals.py``).
 
     Instance-level surface (Odoo PR #179148 triple, plus actor / sudo binding):
 
@@ -145,18 +148,26 @@ class RebacMixin(models.Model, metaclass=RebacModelBase):
       - ``instance.is_sudo()`` / ``instance.actor()`` — introspection.
       - ``instance.check_access(action)`` — three-state ``CheckResult``.
       - ``instance.has_access(action)`` — boolean shorthand.
+
+    Pickle / cross-process posture:
+      ``__getstate__`` strips ``_rebac_actor``, ``_rebac_sudo_reason``, and
+      ``_rebac_loaded_values`` before pickling. Instances crossing
+      process / wire boundaries (e.g. ``apply_async(args=[instance])``)
+      lose their pinned actor and sudo binding; the receiving worker MUST
+      re-attach an actor via middleware / Celery hook before saving. This
+      is fail-closed by design — actor identity must be re-asserted at
+      every trust boundary, never silently inherited from a serialised
+      blob.
     """
 
     objects = RebacManager()
 
     # Carried through from_db (via the queryset's `_fetch_all`) so
-    # `instance.save()` re-checks against the same actor.
+    # `instance.save()` re-checks against the same actor. Both this and
+    # `_rebac_sudo_reason` are stripped by `__getstate__` below — pickled
+    # instances arrive at the receiving process with NO actor / NO sudo,
+    # forcing the consumer to re-attach via middleware / Celery hook.
     _rebac_actor: SubjectRef | None = None
-    # TODO(spec): pickle posture — instances may cross HTTP→Celery via
-    # ``apply_async(args=[instance])``; whether ``_rebac_sudo_reason``
-    # should travel is undecided. Default behaviour today: it pickles.
-    # Consumers serialising RebacMixin instances should clear sudo before
-    # dispatch. Track in ARCHITECTURE.md "Open questions".
     _rebac_sudo_reason: str | None = None
 
     class Meta:
@@ -164,7 +175,45 @@ class RebacMixin(models.Model, metaclass=RebacModelBase):
 
     @classmethod
     def from_db(cls, db: Any, field_names: Any, values: Any) -> RebacMixin:
-        return super().from_db(db, field_names, values)
+        """Instantiate from a row + snapshot loaded field values.
+
+        The snapshot lives on ``instance._rebac_loaded_values`` and powers
+        per-field write gates: ``signals.py`` compares it against the
+        current values to detect dirty fields, then re-checks each one
+        against ``write__<field>`` if such a permission is declared.
+
+        Deferred fields are skipped (they aren't in ``field_names``); a
+        subsequent ``refresh_from_db`` does NOT update the snapshot — that
+        would defeat the audit purpose of "what was on the row when the
+        actor first loaded it". Pure in-memory; no extra queries.
+        """
+        from django.db.models import DEFERRED
+
+        instance = super().from_db(db, field_names, values)
+        snapshot: dict[str, Any] = {}
+        for name, value in zip(field_names, values, strict=False):
+            if value is DEFERRED:
+                continue
+            snapshot[name] = value
+        instance._rebac_loaded_values = snapshot
+        return instance
+
+    def __getstate__(self) -> dict[str, Any]:
+        """Strip per-instance REBAC binding before pickling.
+
+        Removes ``_rebac_actor``, ``_rebac_sudo_reason``, and
+        ``_rebac_loaded_values`` so a pickled instance cannot smuggle a
+        trusted actor across a process boundary. The receiving end must
+        re-attach an actor via middleware / Celery hook (see CLAUDE.md
+        § 5 — actor lives on the queryset / instance, not in a ContextVar
+        that survives pickling).
+        """
+        state = super().__getstate__()
+        if isinstance(state, dict):
+            state.pop("_rebac_actor", None)
+            state.pop("_rebac_sudo_reason", None)
+            state.pop("_rebac_loaded_values", None)
+        return state
 
     # ----- Actor / sudo binding -----
 

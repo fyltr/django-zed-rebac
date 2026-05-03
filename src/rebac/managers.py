@@ -168,7 +168,7 @@ class RebacQuerySet(models.QuerySet):
                     "PositiveSmallIntegerField",
                 ):
                     ids = [int(i) for i in ids]
-            except (ValueError, TypeError):
+            except ValueError, TypeError:
                 pass
         # ``Q.add_q`` works even on sliced queries.
         self.query.add_q(Q(**{f"{attr}__in": ids}))
@@ -215,6 +215,11 @@ class RebacQuerySet(models.QuerySet):
         rebac_type = getattr(self.model._meta, "rebac_resource_type", None)
         if rebac_type:
             self._guard_bulk_action(actor, "write")  # type: ignore[arg-type]
+            # Per-field write gates — same all-or-nothing semantics as the
+            # resource-level write check above. For each kwarg whose field
+            # has a ``write__<f>`` permission declared, every affected row
+            # must also pass that check.
+            self._guard_bulk_field_writes(actor, kwargs)  # type: ignore[arg-type]
         return super().update(**kwargs)
 
     def delete(self) -> tuple[int, dict[str, int]]:
@@ -243,6 +248,68 @@ class RebacQuerySet(models.QuerySet):
                 f"Bulk {action}: {len(denied)} row(s) outside actor scope (e.g. {sample}). "
                 f"Bulk operations are all-or-nothing."
             )
+
+    def _guard_bulk_field_writes(self, actor: SubjectRef, kwargs: dict[str, Any]) -> None:
+        """Per-field write enforcement for bulk ``QuerySet.update()``.
+
+        Mirrors the per-field gate run in ``signals.pre_save``: for each
+        ``f`` in ``kwargs`` whose resource type declares a permission
+        named ``write__<f>``, every row in the current scope must pass
+        that check too — same all-or-nothing semantics as the
+        resource-level check. Any denied row aborts the whole update.
+
+        Backends without an in-process schema accessor (i.e. SpiceDB
+        once 0.5 lands) skip this — they'll route per-field checks
+        through their own server-side schema. The resource-level
+        ``write`` check already ran before we got here.
+        """
+        from .backends import backend
+        from .schema.ast import Schema
+
+        rebac_type = self.model._meta.rebac_resource_type  # type: ignore[attr-defined]
+        accessor = getattr(backend(), "schema", None)
+        if not callable(accessor):
+            return
+        try:
+            schema = accessor()
+        except Exception:
+            return
+        if not isinstance(schema, Schema):
+            return
+        definition = schema.get_definition(rebac_type)
+        if definition is None:
+            return
+        declared = {p.name for p in definition.permissions if p.name.startswith("write__")}
+        if not declared:
+            return
+
+        attr = resource_id_attr(self.model)
+        affected = {str(v) for v in self.values_list(attr, flat=True)}
+        if not affected:
+            return
+
+        meta = self.model._meta
+        for raw_name in kwargs.keys():
+            # Normalise FK attname → field.name so ``write__folder`` matches
+            # an ``update(folder_id=...)`` call.
+            try:
+                field = meta.get_field(raw_name)
+                field_name = field.name
+            except Exception:
+                field_name = raw_name
+            action = f"write__{field_name}"
+            if action not in declared:
+                continue
+            allowed = set(
+                backend().accessible(subject=actor, action=action, resource_type=rebac_type)
+            )
+            denied = affected - allowed
+            if denied:
+                sample = ", ".join(sorted(denied)[:5])
+                raise PermissionDenied(
+                    f"Bulk {action}: {len(denied)} row(s) outside actor scope "
+                    f"(e.g. {sample}). Bulk operations are all-or-nothing."
+                )
 
 
 class RebacManager(models.Manager.from_queryset(RebacQuerySet)):  # type: ignore[misc]
