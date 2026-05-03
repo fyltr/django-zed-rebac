@@ -73,7 +73,10 @@ def test_sudo_requires_reason_when_strict():
             pass
 
 
+@pytest.mark.django_db
 def test_sudo_with_reason_flips_flag():
+    # `sudo()` now writes a PermissionAuditEvent on enter, so this test
+    # needs DB access. Behaviour under test (the flag flip) is unchanged.
     assert not is_sudo()
     with sudo(reason="cron.test"):
         assert is_sudo()

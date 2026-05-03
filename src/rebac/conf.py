@@ -43,6 +43,13 @@ _DEFAULTS: dict[str, Any] = {
     # actor is a Django ``User`` / ``Group`` instance. Per-model
     # ``Meta.rebac_id_attr`` still wins when set.
     "REBAC_USER_ID_ATTR": "pk",
+    # When True, the pre-save / pre-delete signal handlers also write a
+    # PermissionAuditEvent row before raising PermissionDenied. Defaults to
+    # False because every denied write doubles as a failed-attempt log row,
+    # which can dominate the audit table on heavy denial traffic (e.g. an
+    # attacker fuzzing IDs). Switch on for high-stakes deployments where
+    # forensic trails of attempted writes outweigh the volume cost.
+    "REBAC_AUDIT_DENIALS": False,
 }
 
 

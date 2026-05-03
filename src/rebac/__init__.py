@@ -51,6 +51,7 @@ from .types import (
 )
 
 if TYPE_CHECKING:
+    from .audit import emit as emit_audit_event
     from .backends import Backend, LocalBackend, SpiceDBBackend
     from .decorators import rebac_resource, require_permission
     from .mixins import RebacMixin, RebacObjectMeta
@@ -75,6 +76,7 @@ _LAZY = {
     "write_relationships": ("rebac.relationships", "write_relationships"),
     "delete_relationships": ("rebac.relationships", "delete_relationships"),
     "to_object_ref": ("rebac.resources", "to_object_ref"),
+    "emit_audit_event": ("rebac.audit", "emit"),
 }
 
 
@@ -132,6 +134,7 @@ __all__ = [
     # helpers
     "write_relationships",
     "delete_relationships",
+    "emit_audit_event",
     # settings
     "app_settings",
 ]
