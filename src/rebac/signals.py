@@ -27,10 +27,14 @@ def _rebac_pre_save(
     rebac_type = getattr(sender._meta, "rebac_resource_type", None)
     if not rebac_type:
         return
-    if _is_sudo():
+    # Per-instance sudo (set by `instance.sudo(reason=...)`) bypasses the
+    # check just like the ambient ContextVar. Per CLAUDE.md § 5a, the flag
+    # is non-transitive — it lives on this instance only and does not
+    # propagate to FK / M2M accessors.
+    if _is_sudo() or getattr(instance, "_rebac_sudo_reason", None) is not None:
         return
 
-    # Resolve actor: per-instance (set by from_db / queryset) → ambient.
+    # Resolve actor: per-instance (set by from_db / queryset / .with_actor) → ambient.
     actor = getattr(instance, "_rebac_actor", None) or _current_actor()
     if actor is None:
         if app_settings.REBAC_STRICT_MODE:
@@ -67,7 +71,7 @@ def _rebac_pre_delete(sender: type, instance: Any, using: Any = None, **_: Any) 
     rebac_type = getattr(sender._meta, "rebac_resource_type", None)
     if not rebac_type:
         return
-    if _is_sudo():
+    if _is_sudo() or getattr(instance, "_rebac_sudo_reason", None) is not None:
         return
 
     actor = getattr(instance, "_rebac_actor", None) or _current_actor()
