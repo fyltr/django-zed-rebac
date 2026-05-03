@@ -102,3 +102,60 @@ def check_actor_middleware_order(
             )
         ]
     return []
+
+
+def _is_rebac_bound(model: Any) -> bool:
+    """A model is RBAC-bound iff its ``_meta`` carries a truthy
+    ``rebac_resource_type`` attribute (set by ``RebacModelBase`` from
+    ``Meta.rebac_resource_type``)."""
+    meta = getattr(model, "_meta", None)
+    if meta is None:
+        return False
+    return bool(getattr(meta, "rebac_resource_type", None))
+
+
+@checks.register("rebac")
+def check_cross_rbac_relations(app_configs: Any = None, **kwargs: Any) -> list[checks.CheckMessage]:
+    """Warn when an RBAC-bound model declares a forward FK / O2O / M2M whose
+    target is also RBAC-bound.
+
+    Bare-string ``qs.prefetch_related("rel")`` against an RBAC-bound related
+    model does not auto-scope in v1 — callers must use the explicit
+    ``Prefetch(queryset=Related.objects.with_actor(actor))`` form. This check
+    surfaces every such relation at startup so the JOIN-leak surface is
+    greppable. Reverse accessors are out of scope for v1.
+    """
+    from django.apps import apps
+    from django.db import models
+
+    issues: list[checks.CheckMessage] = []
+    relation_types = (models.ForeignKey, models.OneToOneField, models.ManyToManyField)
+    for model in apps.get_models():
+        if not _is_rebac_bound(model):
+            continue
+        for field in model._meta.get_fields():
+            # Limit to forward declarations: skip reverse accessors and
+            # auto-created intermediates.
+            if not isinstance(field, relation_types):
+                continue
+            related = getattr(field, "related_model", None)
+            if related is None:
+                continue
+            if not _is_rebac_bound(related):
+                continue
+            model_label = f"{model._meta.app_label}.{model.__name__}"
+            related_label = f"{related._meta.app_label}.{related.__name__}"
+            issues.append(
+                checks.Warning(
+                    f"{model_label}.{field.name}: bare-string "
+                    "select_related/prefetch_related against RBAC-bound "
+                    f"related model {related_label} won't auto-scope.",
+                    hint=(
+                        f'Use Prefetch("{field.name}", queryset='
+                        f"{related.__name__}.objects.with_actor(actor))."
+                    ),
+                    obj=model,
+                    id="rebac.W003",
+                )
+            )
+    return issues
