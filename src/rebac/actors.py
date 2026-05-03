@@ -14,7 +14,7 @@ from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
 from importlib import import_module
-from typing import Any, Protocol
+from typing import TYPE_CHECKING, Any, Protocol
 
 from django.contrib.auth import get_user_model
 
@@ -25,6 +25,10 @@ from .errors import (
     SudoReasonRequiredError,
 )
 from .types import ObjectRef, SubjectRef
+
+if TYPE_CHECKING:
+    from .backends.base import Backend
+    from .types import Consistency
 
 # ---------- ContextVar ----------
 
@@ -44,30 +48,40 @@ _accessible_cache: ContextVar[dict[tuple[Any, str, str], tuple[str, ...]] | None
 
 
 def accessible_cached(
-    backend: Any,
+    backend: Backend,
     *,
     subject: SubjectRef,
     action: str,
     resource_type: str,
+    context: dict | None = None,
+    consistency: Consistency | None = None,
 ) -> tuple[str, ...]:
     """Memoised wrapper for ``backend.accessible(...)``.
 
-    Returns a tuple of accessible resource ids (sorted in the
-    backend's own order — we don't re-sort here so SpiceDB's eventual
-    server-side ordering doesn't drift between cached / uncached
-    paths).
+    Cache key: ``(str(subject), action, resource_type)``. Two
+    ``SubjectRef`` instances representing the same actor share a slot
+    via the canonical wire form. The cache rides on a ContextVar so
+    each request / Celery task / async context gets its own.
 
-    Cache key: ``(subject_canonical_str, action, resource_type)``.
-    Subjects are flattened to their string form so two SubjectRef
-    objects representing the same actor share a cache slot. The
-    cache lives in a ContextVar — empty per-request unless someone
-    explicitly enables it via :func:`enable_accessible_cache`.
+    Returns a tuple of accessible resource ids in the backend's own
+    order. The cache is opt-in: when no bracket is open
+    (:func:`enable_accessible_cache`) every call goes straight to
+    ``backend.accessible()``.
 
-    Falls back to the raw ``backend.accessible()`` call when the
-    cache is disabled (the common case outside a GraphQL request),
-    so unit tests / scripts that use the engine directly aren't
-    affected.
+    Caveat context bypasses the cache: when ``context`` or a
+    non-default ``consistency`` is supplied the result depends on
+    inputs not encoded in the key, so we must not memoise.
     """
+    if context is not None or consistency is not None:
+        return tuple(
+            backend.accessible(
+                subject=subject,
+                action=action,
+                resource_type=resource_type,
+                context=context,
+                consistency=consistency,
+            )
+        )
     cache = _accessible_cache.get()
     if cache is None:
         return tuple(
@@ -99,9 +113,11 @@ def enable_accessible_cache() -> Any:
     state. Safe to call recursively — nested enables stack via the
     ContextVar's natural set/reset semantics.
 
-    The hook is opt-in; consumers wire it into their request lifecycle
-    (the ``django-angee`` framework does this via
-    ``angee.schema.error_mask.AngeeSchema``'s extension list).
+    Opt-in by design: consumer middleware brackets a request lifecycle
+    by calling ``enable_accessible_cache`` on entry and
+    ``disable_accessible_cache`` on exit. Do not enable across
+    long-running tasks without periodic disable — the cache dict has
+    no size bound within a bracket.
     """
     return _accessible_cache.set({})
 

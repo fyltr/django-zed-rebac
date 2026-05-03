@@ -92,6 +92,8 @@ class LocalBackend(Backend):
             SchemaCaveat,
             SchemaDefinition,
             SchemaOverride,
+            SchemaPermission,
+            SchemaRelation,
         )
         from ..schema.ast import (
             Caveat,
@@ -103,27 +105,13 @@ class LocalBackend(Backend):
         )
         from ..schema.parser import parse_permission_expression
 
-        # Use Prefetch with the order_by baked in so the prefetch cache
-        # is actually used. A bare `d.relations.all().order_by("name")`
-        # spawns a fresh queryset per definition (N+1 on schema load) —
-        # surfaced by 10_perf_query_budgets.yaml at 30+ queries for a
-        # single GraphQL list resolver. With Prefetch the entire schema
-        # loads in 4 queries (defs / relations / permissions / caveats)
-        # regardless of how many definitions are registered.
+        # Bake the per-relation order_by into Prefetch so the prefetch cache
+        # is reused; a bare `d.relations.all().order_by(...)` per definition
+        # is N+1 on schema load.
         defs: list[Definition] = []
         defs_qs = SchemaDefinition.objects.prefetch_related(
-            Prefetch(
-                "relations",
-                queryset=SchemaDefinition.relations.rel.related_model.objects.order_by(
-                    "name"
-                ),
-            ),
-            Prefetch(
-                "permissions",
-                queryset=SchemaDefinition.permissions.rel.related_model.objects.order_by(
-                    "name"
-                ),
-            ),
+            Prefetch("relations", queryset=SchemaRelation.objects.order_by("name")),
+            Prefetch("permissions", queryset=SchemaPermission.objects.order_by("name")),
         ).order_by("resource_type")
         for d in defs_qs:
             relations = []
