@@ -85,6 +85,8 @@ class LocalBackend(Backend):
         return self._schema
 
     def _load_schema_from_db(self) -> Schema:
+        from django.db.models import Prefetch
+
         from ..composition import compose
         from ..models import (
             SchemaCaveat,
@@ -101,12 +103,31 @@ class LocalBackend(Backend):
         )
         from ..schema.parser import parse_permission_expression
 
+        # Use Prefetch with the order_by baked in so the prefetch cache
+        # is actually used. A bare `d.relations.all().order_by("name")`
+        # spawns a fresh queryset per definition (N+1 on schema load) —
+        # surfaced by 10_perf_query_budgets.yaml at 30+ queries for a
+        # single GraphQL list resolver. With Prefetch the entire schema
+        # loads in 4 queries (defs / relations / permissions / caveats)
+        # regardless of how many definitions are registered.
         defs: list[Definition] = []
-        for d in SchemaDefinition.objects.prefetch_related("relations", "permissions").order_by(
-            "resource_type"
-        ):
+        defs_qs = SchemaDefinition.objects.prefetch_related(
+            Prefetch(
+                "relations",
+                queryset=SchemaDefinition.relations.rel.related_model.objects.order_by(
+                    "name"
+                ),
+            ),
+            Prefetch(
+                "permissions",
+                queryset=SchemaDefinition.permissions.rel.related_model.objects.order_by(
+                    "name"
+                ),
+            ),
+        ).order_by("resource_type")
+        for d in defs_qs:
             relations = []
-            for r in d.relations.all().order_by("name"):
+            for r in d.relations.all():
                 allowed = tuple(
                     AllowedSubject(
                         type=item["type"],
@@ -118,7 +139,7 @@ class LocalBackend(Backend):
                 )
                 relations.append(Relation(r.name, allowed, r.with_expiration))
             permissions: list[Permission] = []
-            for p in d.permissions.all().order_by("name"):
+            for p in d.permissions.all():
                 expr = parse_permission_expression(p.expression)
                 permissions.append(Permission(p.name, expr, p.expression))
             defs.append(Definition(d.resource_type, tuple(relations), tuple(permissions)))

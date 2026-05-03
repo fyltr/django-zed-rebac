@@ -127,6 +127,15 @@ class RebacQuerySet(models.QuerySet):
         Avoids ``self.filter(...)`` because ``.get()`` pre-slices the
         queryset and ``.filter()`` rejects post-slice. ``Q.add_q``
         operates at the SQL level and bypasses the slice check.
+
+        ``backend().accessible()`` is memoised per-actor + action +
+        resource_type via the ambient ``_accessible_cache`` ContextVar
+        (``rebac.actors``). A single GraphQL request that materialises
+        the same scoped queryset multiple times (aggregate primary
+        + ``totalCount`` + per-measure resolvers, paginated lookups,
+        nested edges) collapses to one ``accessible()`` graph walk —
+        the underlying relationship SQL is bounded by the schema's
+        depth, not by the number of resolvers fired.
         """
         if self._rebac_scope_applied:
             return
@@ -139,11 +148,13 @@ class RebacQuerySet(models.QuerySet):
             return
         from django.db.models import Q
 
+        from .actors import accessible_cached
         from .backends import backend
 
         action = getattr(self.model._meta, "rebac_default_action", "read")
         ids = list(
-            backend().accessible(
+            accessible_cached(
+                backend(),
                 subject=actor,  # type: ignore[arg-type]
                 action=action,
                 resource_type=rebac_type,

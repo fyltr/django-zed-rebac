@@ -31,6 +31,85 @@ from .types import ObjectRef, SubjectRef
 _current_actor: ContextVar[SubjectRef | None] = ContextVar("rebac_current_actor", default=None)
 _sudo_state: ContextVar[dict[str, Any] | None] = ContextVar("rebac_sudo", default=None)
 
+# Per-request memoisation of `backend().accessible(...)` lookups. Reset
+# whenever the actor or sudo state flips so a single conceptual
+# request (which the middleware brackets via `_current_actor.set/reset`)
+# only walks the relationship graph once per (subject, action,
+# resource_type) triple. The cache rides on a ContextVar — same
+# isolation guarantees as `_current_actor` — so async tasks and
+# Celery workers each get their own.
+_accessible_cache: ContextVar[dict[tuple[Any, str, str], tuple[str, ...]] | None] = ContextVar(
+    "rebac_accessible_cache", default=None
+)
+
+
+def accessible_cached(
+    backend: Any,
+    *,
+    subject: SubjectRef,
+    action: str,
+    resource_type: str,
+) -> tuple[str, ...]:
+    """Memoised wrapper for ``backend.accessible(...)``.
+
+    Returns a tuple of accessible resource ids (sorted in the
+    backend's own order — we don't re-sort here so SpiceDB's eventual
+    server-side ordering doesn't drift between cached / uncached
+    paths).
+
+    Cache key: ``(subject_canonical_str, action, resource_type)``.
+    Subjects are flattened to their string form so two SubjectRef
+    objects representing the same actor share a cache slot. The
+    cache lives in a ContextVar — empty per-request unless someone
+    explicitly enables it via :func:`enable_accessible_cache`.
+
+    Falls back to the raw ``backend.accessible()`` call when the
+    cache is disabled (the common case outside a GraphQL request),
+    so unit tests / scripts that use the engine directly aren't
+    affected.
+    """
+    cache = _accessible_cache.get()
+    if cache is None:
+        return tuple(
+            backend.accessible(
+                subject=subject,
+                action=action,
+                resource_type=resource_type,
+            )
+        )
+    key = (str(subject), action, resource_type)
+    if key in cache:
+        return cache[key]
+    ids = tuple(
+        backend.accessible(
+            subject=subject,
+            action=action,
+            resource_type=resource_type,
+        )
+    )
+    cache[key] = ids
+    return ids
+
+
+def enable_accessible_cache() -> Any:
+    """Open a per-request ``accessible()`` cache.
+
+    Returns the token to pass back to :func:`disable_accessible_cache`
+    so middleware / extension teardown can restore the prior cache
+    state. Safe to call recursively — nested enables stack via the
+    ContextVar's natural set/reset semantics.
+
+    The hook is opt-in; consumers wire it into their request lifecycle
+    (the ``django-angee`` framework does this via
+    ``angee.schema.error_mask.AngeeSchema``'s extension list).
+    """
+    return _accessible_cache.set({})
+
+
+def disable_accessible_cache(token: Any) -> None:
+    """Close the cache opened by :func:`enable_accessible_cache`."""
+    _accessible_cache.reset(token)
+
 
 def current_actor() -> SubjectRef | None:
     """The ambient actor. None when no middleware / task hook has populated it."""
