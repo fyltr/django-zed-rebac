@@ -15,6 +15,17 @@ accepts. A recursive-CTE optimisation path is layered on for `accessible()`
 when `REBAC_PK_IN_THRESHOLD` is exceeded; for v0.1 we use the Python walk
 with prefetched relationship rows. The same code path runs on Postgres / MySQL
 / SQLite identically.
+
+Caveats are tri-state:
+
+  - True path  → row matches.
+  - False path → row treated as if absent.
+  - None path  → caveat is conditional (required params not supplied).
+    `_eval_permission` / `_has_direct_relation` return `None` and accumulate
+    the union of required-but-missing param names into the caller's
+    `missing` set. `check_access` surfaces CONDITIONAL when no unconditional
+    path matches; `accessible` silently excludes conditional rows
+    (read-side conservative).
 """
 
 from __future__ import annotations
@@ -151,6 +162,9 @@ class LocalBackend(Backend):
             return CheckResult.no(reason=f"unknown resource type: {resource.resource_type}")
 
         permission = self.schema().get_permission(resource.resource_type, action)
+        # Per-call accumulator for "missing caveat parameter" names. Populated
+        # by tri-state row scans below; surfaced via CheckResult.conditional.
+        missing: set[str] = set()
         if permission is None:
             # No permission expression — fall back to checking the relation directly.
             allowed = self._has_direct_relation(
@@ -159,17 +173,24 @@ class LocalBackend(Backend):
                 relation=action,
                 subject=subject,
                 depth=0,
+                context=context,
+                missing=missing,
             )
-            return CheckResult.has() if allowed else CheckResult.no()
-
-        allowed = self._eval_permission(
-            expr=permission.expression,
-            definition=definition,
-            resource_id=resource.resource_id,
-            subject=subject,
-            depth=0,
-        )
-        return CheckResult.has() if allowed else CheckResult.no()
+        else:
+            allowed = self._eval_permission(
+                expr=permission.expression,
+                definition=definition,
+                resource_id=resource.resource_id,
+                subject=subject,
+                depth=0,
+                context=context,
+                missing=missing,
+            )
+        if allowed is True:
+            return CheckResult.has()
+        if allowed is None:
+            return CheckResult.conditional(missing=tuple(sorted(missing)))
+        return CheckResult.no()
 
     def accessible(
         self,
@@ -180,6 +201,10 @@ class LocalBackend(Backend):
         context: dict | None = None,
         consistency: Consistency | None = None,
     ) -> Iterable[str]:
+        # accessible() is read-side conservative for caveats: rows whose caveat
+        # evaluates to False OR is conditional (missing params) are excluded
+        # silently. Callers wanting to learn about conditional rows should use
+        # check_access() against a specific resource id.
         definition = self.schema().get_definition(resource_type)
         if definition is None:
             return []
@@ -195,6 +220,7 @@ class LocalBackend(Backend):
                     subject=subject,
                     depth=0,
                     cache=cache,
+                    context=context,
                 )
             )
         return list(
@@ -204,6 +230,7 @@ class LocalBackend(Backend):
                 subject=subject,
                 depth=0,
                 cache=cache,
+                context=context,
             )
         )
 
@@ -292,11 +319,24 @@ class LocalBackend(Backend):
         resource_id: str,
         subject: SubjectRef,
         depth: int,
-    ) -> bool:
+        context: dict | None = None,
+        missing: set[str] | None = None,
+    ) -> bool | None:
+        """Tri-state permission evaluation.
+
+        Returns:
+            True  — permission unconditionally allowed.
+            False — permission unconditionally denied.
+            None  — at least one path is conditional on caveat params not yet
+                    supplied; the union of missing names is added to
+                    `missing` (caller-owned set).
+        """
         # Depth counts dispatch hops (arrow walks + subject-set traversals),
         # not expression-tree shape. Binary operators don't increment depth.
         if depth > app_settings.REBAC_DEPTH_LIMIT:
             raise PermissionDepthExceeded(f"Depth limit {app_settings.REBAC_DEPTH_LIMIT} exceeded")
+        if missing is None:
+            missing = set()
         if isinstance(expr, PermNil):
             return False
         if isinstance(expr, PermRef):
@@ -308,11 +348,19 @@ class LocalBackend(Backend):
                     relation=expr.name,
                     subject=subject,
                     depth=depth,
+                    context=context,
+                    missing=missing,
                 )
             sub_perm = next((p for p in definition.permissions if p.name == expr.name), None)
             if sub_perm is not None:
                 return self._eval_permission(
-                    sub_perm.expression, definition, resource_id, subject, depth
+                    sub_perm.expression,
+                    definition,
+                    resource_id,
+                    subject,
+                    depth,
+                    context,
+                    missing,
                 )
             return False
         if isinstance(expr, PermArrow):
@@ -326,34 +374,59 @@ class LocalBackend(Backend):
                 resource_id=resource_id,
                 relation=expr.via,
             )
+            saw_conditional = False
             for row in targets:
+                # The hop row itself may carry a caveat — evaluate it before
+                # walking through to the target type.
+                hop = self._evaluate_row_caveat(row, context, missing)
+                if hop is False:
+                    continue
                 target_def = self.schema().get_definition(row.subject_type)
                 if target_def is None:
                     continue
-                if self._eval_permission_on(
+                inner = self._eval_permission_on(
                     permission_name=expr.target,
                     definition=target_def,
                     resource_id=row.subject_id,
                     subject=subject,
                     depth=depth + 1,
-                ):
+                    context=context,
+                    missing=missing,
+                )
+                # Combine hop AND inner.
+                combined = _and(hop, inner)
+                if combined is True:
                     return True
+                if combined is None:
+                    saw_conditional = True
+            if saw_conditional:
+                return None
             return False
         if isinstance(expr, PermBinOp):
-            left = self._eval_permission(expr.left, definition, resource_id, subject, depth)
+            left = self._eval_permission(
+                expr.left, definition, resource_id, subject, depth, context, missing
+            )
             if expr.op == "+":
-                if left:
+                if left is True:
                     return True
-                return self._eval_permission(expr.right, definition, resource_id, subject, depth)
+                right = self._eval_permission(
+                    expr.right, definition, resource_id, subject, depth, context, missing
+                )
+                return _or(left, right)
             if expr.op == "&":
-                if not left:
+                if left is False:
                     return False
-                return self._eval_permission(expr.right, definition, resource_id, subject, depth)
+                right = self._eval_permission(
+                    expr.right, definition, resource_id, subject, depth, context, missing
+                )
+                return _and(left, right)
             if expr.op == "-":
-                if not left:
+                if left is False:
                     return False
-                right = self._eval_permission(expr.right, definition, resource_id, subject, depth)
-                return not right
+                right = self._eval_permission(
+                    expr.right, definition, resource_id, subject, depth, context, missing
+                )
+                return _minus(left, right)
             raise ValueError(f"unknown operator: {expr.op}")
         raise TypeError(f"unknown PermExpr: {expr!r}")
 
@@ -364,7 +437,9 @@ class LocalBackend(Backend):
         resource_id: str,
         subject: SubjectRef,
         depth: int,
-    ) -> bool:
+        context: dict | None = None,
+        missing: set[str] | None = None,
+    ) -> bool | None:
         permission = next((p for p in definition.permissions if p.name == permission_name), None)
         if permission is None:
             # Treat as direct relation lookup.
@@ -374,8 +449,12 @@ class LocalBackend(Backend):
                 relation=permission_name,
                 subject=subject,
                 depth=depth,
+                context=context,
+                missing=missing,
             )
-        return self._eval_permission(permission.expression, definition, resource_id, subject, depth)
+        return self._eval_permission(
+            permission.expression, definition, resource_id, subject, depth, context, missing
+        )
 
     def _has_direct_relation(
         self,
@@ -384,11 +463,21 @@ class LocalBackend(Backend):
         relation: str,
         subject: SubjectRef,
         depth: int,
-    ) -> bool:
+        context: dict | None = None,
+        missing: set[str] | None = None,
+    ) -> bool | None:
+        """Tri-state direct-relation lookup.
+
+        Returns True / False as before; returns None if the only matching row
+        is conditional (caveat params missing), accumulating those names in
+        the caller-owned `missing` set.
+        """
         # Subject-set rows count as a dispatch hop, so callers add 1 there;
         # the entry guard catches runaway recursion.
         if depth > app_settings.REBAC_DEPTH_LIMIT:
             raise PermissionDepthExceeded(f"Depth limit {app_settings.REBAC_DEPTH_LIMIT} exceeded")
+        if missing is None:
+            missing = set()
         from ..models import Relationship as RelationshipModel
 
         rows = RelationshipModel.objects.filter(
@@ -396,37 +485,92 @@ class LocalBackend(Backend):
             resource_id=resource_id,
             relation=relation,
         )
+        saw_conditional = False
         # Direct subject match
-        direct = rows.filter(
-            subject_type=subject.subject_type,
-            subject_id=subject.subject_id,
-            optional_subject_relation=subject.optional_relation,
+        direct = _filter_active(
+            rows.filter(
+                subject_type=subject.subject_type,
+                subject_id=subject.subject_id,
+                optional_subject_relation=subject.optional_relation,
+            )
         )
-        if _filter_active(direct).exists():
-            return True
+        for row in direct:
+            verdict = self._evaluate_row_caveat(row, context, missing)
+            if verdict is True:
+                return True
+            if verdict is None:
+                saw_conditional = True
 
         # Wildcard match on (subject_type, "*"). Only valid for direct subject
         # types (not subject sets).
         if not subject.optional_relation:
-            wildcard = rows.filter(
-                subject_type=subject.subject_type,
-                subject_id="*",
+            wildcard = _filter_active(
+                rows.filter(
+                    subject_type=subject.subject_type,
+                    subject_id="*",
+                )
             )
-            if _filter_active(wildcard).exists():
-                return True
+            for row in wildcard:
+                verdict = self._evaluate_row_caveat(row, context, missing)
+                if verdict is True:
+                    return True
+                if verdict is None:
+                    saw_conditional = True
 
         # Subject-set rows: e.g. `viewer @ auth/group:eng#member`. Walk the
         # group's `member` relation and see if subject is a member.
         for row in rows.exclude(optional_subject_relation=""):
-            if _is_active(row) and self._has_direct_relation(
+            if not _is_active(row):
+                continue
+            hop = self._evaluate_row_caveat(row, context, missing)
+            if hop is False:
+                continue
+            inner = self._has_direct_relation(
                 resource_type=row.subject_type,
                 resource_id=row.subject_id,
                 relation=row.optional_subject_relation,
                 subject=subject,
                 depth=depth + 1,
-            ):
+                context=context,
+                missing=missing,
+            )
+            combined = _and(hop, inner)
+            if combined is True:
                 return True
+            if combined is None:
+                saw_conditional = True
+        if saw_conditional:
+            return None
         return False
+
+    def _evaluate_row_caveat(
+        self,
+        row: object,
+        context: dict | None,
+        missing: set[str],
+    ) -> bool | None:
+        """Evaluate a Relationship row's caveat (if any). Tri-state.
+
+        Returns True if the row has no caveat or its caveat evaluates True;
+        False if the caveat evaluates False (row treated as absent);
+        None if required parameters are missing (caller surfaces CONDITIONAL).
+        Adds missing param names to the caller's `missing` set.
+        """
+        caveat_name = getattr(row, "caveat_name", "") or ""
+        if not caveat_name:
+            return True
+        caveat = self.schema().get_caveat(caveat_name)
+        if caveat is None:
+            # Schema doesn't know about this caveat — fail closed.
+            return False
+        from ..caveats import evaluate as eval_caveat
+
+        static_ctx = getattr(row, "caveat_context", None) or {}
+        verdict, miss = eval_caveat(caveat, static_ctx, context)
+        if verdict is None:
+            missing.update(miss)
+            return None
+        return verdict
 
     def _resources_for_expr(
         self,
@@ -435,6 +579,7 @@ class LocalBackend(Backend):
         subject: SubjectRef,
         depth: int,
         cache: dict[tuple[str, str], set[str] | None],
+        context: dict | None = None,
     ) -> set[str]:
         if depth > app_settings.REBAC_DEPTH_LIMIT:
             raise PermissionDepthExceeded(f"Depth limit {app_settings.REBAC_DEPTH_LIMIT} exceeded")
@@ -449,11 +594,12 @@ class LocalBackend(Backend):
                     subject=subject,
                     depth=depth,
                     cache=cache,
+                    context=context,
                 )
             sub_perm = next((p for p in definition.permissions if p.name == expr.name), None)
             if sub_perm is not None:
                 return self._resources_for_expr(
-                    sub_perm.expression, definition, subject, depth, cache
+                    sub_perm.expression, definition, subject, depth, cache, context
                 )
             return set()
         if isinstance(expr, PermArrow):
@@ -469,7 +615,7 @@ class LocalBackend(Backend):
                 if target_def is None:
                     continue
                 target_resource_ids = self._compute_accessible_for(
-                    target_type, expr.target, target_def, subject, depth + 1, cache
+                    target_type, expr.target, target_def, subject, depth + 1, cache, context
                 )
                 if not target_resource_ids:
                     continue
@@ -480,11 +626,14 @@ class LocalBackend(Backend):
                     subject_id__in=list(target_resource_ids),
                 )
                 for r in _filter_active(rows):
-                    results.add(r.resource_id)
+                    # Hop-row caveat must evaluate True (silent on conditional).
+                    sink: set[str] = set()
+                    if self._evaluate_row_caveat(r, context, sink) is True:
+                        results.add(r.resource_id)
             return results
         if isinstance(expr, PermBinOp):
-            left = self._resources_for_expr(expr.left, definition, subject, depth, cache)
-            right = self._resources_for_expr(expr.right, definition, subject, depth, cache)
+            left = self._resources_for_expr(expr.left, definition, subject, depth, cache, context)
+            right = self._resources_for_expr(expr.right, definition, subject, depth, cache, context)
             if expr.op == "+":
                 return left | right
             if expr.op == "&":
@@ -502,6 +651,7 @@ class LocalBackend(Backend):
         subject: SubjectRef,
         depth: int,
         cache: dict[tuple[str, str], set[str] | None],
+        context: dict | None = None,
     ) -> set[str]:
         """Memoised entry into `_resources_for_expr` keyed by (type, action).
 
@@ -524,6 +674,7 @@ class LocalBackend(Backend):
                 subject=subject,
                 depth=depth,
                 cache=cache,
+                context=context,
             )
             cache[key] = result
             return result
@@ -534,7 +685,7 @@ class LocalBackend(Backend):
         for _ in range(app_settings.REBAC_DEPTH_LIMIT + 1):
             cache[key] = prev
             current = self._resources_for_expr(
-                target_perm.expression, definition, subject, depth, cache
+                target_perm.expression, definition, subject, depth, cache, context
             )
             if current == prev:
                 break
@@ -549,12 +700,16 @@ class LocalBackend(Backend):
         subject: SubjectRef,
         depth: int,
         cache: dict[tuple[str, str], set[str] | None] | None = None,
+        context: dict | None = None,
     ) -> set[str]:
         if depth > app_settings.REBAC_DEPTH_LIMIT:
             raise PermissionDepthExceeded(f"Depth limit {app_settings.REBAC_DEPTH_LIMIT} exceeded")
         from ..models import Relationship as RelationshipModel
 
         result: set[str] = set()
+        # Local sink: caveat-conditional rows feeding accessible() are
+        # excluded silently, so the missing-param names go nowhere.
+        sink: set[str] = set()
 
         # Direct rows
         direct = RelationshipModel.objects.filter(
@@ -565,7 +720,8 @@ class LocalBackend(Backend):
             optional_subject_relation=subject.optional_relation,
         )
         for r in _filter_active(direct):
-            result.add(r.resource_id)
+            if self._evaluate_row_caveat(r, context, sink) is True:
+                result.add(r.resource_id)
 
         # Wildcard rows
         if not subject.optional_relation:
@@ -576,7 +732,8 @@ class LocalBackend(Backend):
                 subject_id="*",
             )
             for r in _filter_active(wildcard):
-                result.add(r.resource_id)
+                if self._evaluate_row_caveat(r, context, sink) is True:
+                    result.add(r.resource_id)
 
         # Subject-set rows: e.g. resources granted to `auth/group:X#member`
         # require the subject to actually be a member of group X.
@@ -586,13 +743,19 @@ class LocalBackend(Backend):
         for row in subject_set_rows:
             if not _is_active(row):
                 continue
-            if self._has_direct_relation(
+            hop = self._evaluate_row_caveat(row, context, sink)
+            if hop is not True:
+                continue
+            inner = self._has_direct_relation(
                 resource_type=row.subject_type,
                 resource_id=row.subject_id,
                 relation=row.optional_subject_relation,
                 subject=subject,
                 depth=depth + 1,
-            ):
+                context=context,
+                missing=sink,
+            )
+            if inner is True:
                 result.add(row.resource_id)
         return result
 
@@ -630,6 +793,46 @@ def _collect_direct_relations(expr: PermExpr) -> set[str]:
     if isinstance(expr, PermBinOp):
         return _collect_direct_relations(expr.left) | _collect_direct_relations(expr.right)
     return set()
+
+
+# ---------- Tri-state operators ----------
+#
+# `None` means "conditional on caveat params not yet supplied" — short-circuit
+# where possible (True absorbs OR; False absorbs AND), otherwise propagate
+# CONDITIONAL up to the caller. Mirrors SpiceDB's caveat semantics.
+
+
+def _or(left: bool | None, right: bool | None) -> bool | None:
+    if left is True or right is True:
+        return True
+    if left is None or right is None:
+        return None
+    return False
+
+
+def _and(left: bool | None, right: bool | None) -> bool | None:
+    if left is False or right is False:
+        return False
+    if left is None or right is None:
+        return None
+    return True
+
+
+def _minus(left: bool | None, right: bool | None) -> bool | None:
+    # `a - b` ≡ `a AND NOT b`. None on the left absorbs through AND when the
+    # right side denies; otherwise we don't know the answer.
+    if left is False:
+        return False
+    if left is None and right is True:
+        return False  # whatever 'left' resolves to, '- True' kills it.
+    if left is None:
+        return None
+    # left is True
+    if right is True:
+        return False
+    if right is False:
+        return True
+    return None
 
 
 def _filter_active(qs: object) -> object:
