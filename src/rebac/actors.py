@@ -195,8 +195,24 @@ def sudo(*, reason: str | None = None) -> Iterator[None]:
         )
     state = {"reason": reason or ""}
     token = _sudo_state.set(state)
+    # Capture the ambient actor at sudo entry — that's the subject the bypass
+    # is being applied "as". For v1 origin == actor (no impersonation chain
+    # plumbed yet); see audit.emit for the column-level TODO.
+    bypass_actor = _current_actor.get()
     try:
-        # Audit log emission deferred — wired via signals when available.
+        from .audit import emit as _emit_audit
+        from .models import PermissionAuditEvent
+
+        # `defer_to_commit=False` — sudo blocks may run outside a transaction,
+        # and the bypass must always be auditable even if a wrapping transaction
+        # later rolls back.
+        _emit_audit(
+            PermissionAuditEvent.KIND_SUDO_BYPASS,
+            actor=bypass_actor,
+            origin=bypass_actor,
+            reason=state["reason"],
+            defer_to_commit=False,
+        )
         yield
     finally:
         _sudo_state.reset(token)

@@ -13,7 +13,37 @@ from .actors import is_sudo as _is_sudo
 from .conf import app_settings
 from .errors import MissingActorError, PermissionDenied
 from .mixins import RebacMixin
-from .types import ObjectRef
+from .types import ObjectRef, SubjectRef
+
+
+def _maybe_audit_denial(*, actor: SubjectRef | None, action: str, resource: ObjectRef) -> None:
+    """Emit a denial audit row when REBAC_AUDIT_DENIALS is enabled.
+
+    Uses ``defer_to_commit=False`` so the row persists even though the
+    raising save / delete is about to roll back the surrounding transaction.
+
+    Audit kind reuses the relevant grant / revoke kind (a denied write is a
+    grant that didn't happen; a denied delete is a revoke that didn't
+    happen). The reason text carries the ``denied:`` prefix so consumers
+    can distinguish denial from successful writes when querying the trail.
+    """
+    if not app_settings.REBAC_AUDIT_DENIALS:
+        return
+    from .audit import emit as emit_audit
+    from .models import PermissionAuditEvent
+
+    if action == "delete":
+        kind = PermissionAuditEvent.KIND_RELATIONSHIP_REVOKE
+    else:
+        kind = PermissionAuditEvent.KIND_RELATIONSHIP_GRANT
+    emit_audit(
+        kind,
+        actor=actor,
+        origin=actor,
+        target_repr=f"{resource}#{action}",
+        reason=f"denied: {actor} cannot {action} {resource}",
+        defer_to_commit=False,
+    )
 
 
 @receiver(pre_save)
@@ -57,6 +87,7 @@ def _rebac_pre_save(
     resource = ObjectRef(rebac_type, resource_id)
     result = backend().check_access(subject=actor, action=action, resource=resource)
     if not result.allowed:
+        _maybe_audit_denial(actor=actor, action=action, resource=resource)
         raise PermissionDenied(f"Denied: {actor} cannot {action} {resource}")
 
 
@@ -82,4 +113,5 @@ def _rebac_pre_delete(sender: type, instance: Any, using: Any = None, **_: Any) 
     resource = ObjectRef(rebac_type, resource_id)
     result = backend().check_access(subject=actor, action="delete", resource=resource)
     if not result.allowed:
+        _maybe_audit_denial(actor=actor, action="delete", resource=resource)
         raise PermissionDenied(f"Denied: {actor} cannot delete {resource}")
