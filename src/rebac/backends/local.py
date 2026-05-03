@@ -85,11 +85,15 @@ class LocalBackend(Backend):
         return self._schema
 
     def _load_schema_from_db(self) -> Schema:
+        from django.db.models import Prefetch
+
         from ..composition import compose
         from ..models import (
             SchemaCaveat,
             SchemaDefinition,
             SchemaOverride,
+            SchemaPermission,
+            SchemaRelation,
         )
         from ..schema.ast import (
             Caveat,
@@ -101,12 +105,17 @@ class LocalBackend(Backend):
         )
         from ..schema.parser import parse_permission_expression
 
+        # Bake the per-relation order_by into Prefetch so the prefetch cache
+        # is reused; a bare `d.relations.all().order_by(...)` per definition
+        # is N+1 on schema load.
         defs: list[Definition] = []
-        for d in SchemaDefinition.objects.prefetch_related("relations", "permissions").order_by(
-            "resource_type"
-        ):
+        defs_qs = SchemaDefinition.objects.prefetch_related(
+            Prefetch("relations", queryset=SchemaRelation.objects.order_by("name")),
+            Prefetch("permissions", queryset=SchemaPermission.objects.order_by("name")),
+        ).order_by("resource_type")
+        for d in defs_qs:
             relations = []
-            for r in d.relations.all().order_by("name"):
+            for r in d.relations.all():
                 allowed = tuple(
                     AllowedSubject(
                         type=item["type"],
@@ -118,7 +127,7 @@ class LocalBackend(Backend):
                 )
                 relations.append(Relation(r.name, allowed, r.with_expiration))
             permissions: list[Permission] = []
-            for p in d.permissions.all().order_by("name"):
+            for p in d.permissions.all():
                 expr = parse_permission_expression(p.expression)
                 permissions.append(Permission(p.name, expr, p.expression))
             defs.append(Definition(d.resource_type, tuple(relations), tuple(permissions)))

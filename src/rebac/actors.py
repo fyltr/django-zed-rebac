@@ -14,7 +14,7 @@ from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
 from importlib import import_module
-from typing import Any, Protocol
+from typing import TYPE_CHECKING, Any, Protocol
 
 from django.contrib.auth import get_user_model
 
@@ -26,10 +26,105 @@ from .errors import (
 )
 from .types import ObjectRef, SubjectRef
 
+if TYPE_CHECKING:
+    from .backends.base import Backend
+    from .types import Consistency
+
 # ---------- ContextVar ----------
 
 _current_actor: ContextVar[SubjectRef | None] = ContextVar("rebac_current_actor", default=None)
 _sudo_state: ContextVar[dict[str, Any] | None] = ContextVar("rebac_sudo", default=None)
+
+# Per-request memoisation of `backend().accessible(...)` lookups. Reset
+# whenever the actor or sudo state flips so a single conceptual
+# request (which the middleware brackets via `_current_actor.set/reset`)
+# only walks the relationship graph once per (subject, action,
+# resource_type) triple. The cache rides on a ContextVar — same
+# isolation guarantees as `_current_actor` — so async tasks and
+# Celery workers each get their own.
+_accessible_cache: ContextVar[dict[tuple[Any, str, str], tuple[str, ...]] | None] = ContextVar(
+    "rebac_accessible_cache", default=None
+)
+
+
+def accessible_cached(
+    backend: Backend,
+    *,
+    subject: SubjectRef,
+    action: str,
+    resource_type: str,
+    context: dict | None = None,
+    consistency: Consistency | None = None,
+) -> tuple[str, ...]:
+    """Memoised wrapper for ``backend.accessible(...)``.
+
+    Cache key: ``(str(subject), action, resource_type)``. Two
+    ``SubjectRef`` instances representing the same actor share a slot
+    via the canonical wire form. The cache rides on a ContextVar so
+    each request / Celery task / async context gets its own.
+
+    Returns a tuple of accessible resource ids in the backend's own
+    order. The cache is opt-in: when no bracket is open
+    (:func:`enable_accessible_cache`) every call goes straight to
+    ``backend.accessible()``.
+
+    Caveat context bypasses the cache: when ``context`` or a
+    non-default ``consistency`` is supplied the result depends on
+    inputs not encoded in the key, so we must not memoise.
+    """
+    if context is not None or consistency is not None:
+        return tuple(
+            backend.accessible(
+                subject=subject,
+                action=action,
+                resource_type=resource_type,
+                context=context,
+                consistency=consistency,
+            )
+        )
+    cache = _accessible_cache.get()
+    if cache is None:
+        return tuple(
+            backend.accessible(
+                subject=subject,
+                action=action,
+                resource_type=resource_type,
+            )
+        )
+    key = (str(subject), action, resource_type)
+    if key in cache:
+        return cache[key]
+    ids = tuple(
+        backend.accessible(
+            subject=subject,
+            action=action,
+            resource_type=resource_type,
+        )
+    )
+    cache[key] = ids
+    return ids
+
+
+def enable_accessible_cache() -> Any:
+    """Open a per-request ``accessible()`` cache.
+
+    Returns the token to pass back to :func:`disable_accessible_cache`
+    so middleware / extension teardown can restore the prior cache
+    state. Safe to call recursively — nested enables stack via the
+    ContextVar's natural set/reset semantics.
+
+    Opt-in by design: consumer middleware brackets a request lifecycle
+    by calling ``enable_accessible_cache`` on entry and
+    ``disable_accessible_cache`` on exit. Do not enable across
+    long-running tasks without periodic disable — the cache dict has
+    no size bound within a bracket.
+    """
+    return _accessible_cache.set({})
+
+
+def disable_accessible_cache(token: Any) -> None:
+    """Close the cache opened by :func:`enable_accessible_cache`."""
+    _accessible_cache.reset(token)
 
 
 def current_actor() -> SubjectRef | None:
