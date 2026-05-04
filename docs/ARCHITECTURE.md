@@ -469,7 +469,8 @@ All settings prefixed `REBAC_`. No nested dict. Read via the public `app_setting
 | `REBAC_GC_INTERVAL_SECONDS` | `300` | `int` | How often the expiration GC task runs. |
 | `REBAC_ACTOR_RESOLVER` | `"rebac.actors.default_resolver"` | `str` | Dotted-path callable that resolves `request → SubjectRef`. Override for custom identity layers (e.g., agent grants). |
 | `REBAC_TYPE_PREFIX` | `""` | `str` | Optional prefix for all generated resource types (multi-tenant SaaS). |
-| `REBAC_SUPERUSER_BYPASS` | `True` | `bool` | If `True`, `is_superuser=True` short-circuits `has_perm`. Strict tenants set `False`. |
+| `REBAC_SUPERUSER_BYPASS` | `True` | `bool` | If `True`, active superusers short-circuit `has_perm` AND run inside an `ActorMiddleware`-opened `sudo("superuser-bypass")` bracket so QuerySet scoping lifts too. Each elevated request emits a `KIND_SUDO_BYPASS` audit row. Suppressed when `REBAC_ALLOW_SUDO = False`. Strict tenants set this to `False`. |
+| `REBAC_LINT_BARE_PREFETCH` | `False` | `bool` | Opt-in toggle for `rebac.W003` — the structural warning that an RBAC-bound model has an FK / O2O / M2M to another RBAC-bound model (a bare-string `prefetch_related` would JOIN unscoped). Off by default because the check fires for the *existence* of the relation, not for any actual bare-string usage; on a healthy codebase it's pure noise. Flip on for a one-off audit. Goes away once true bare-string prefetch auto-scoping ships. |
 
 Validation runs in the system-checks framework at every `manage.py` invocation. Missing required keys for the chosen backend raise `Error` with check ID `rebac.E001`. Wrong types raise `rebac.E002`. Production-only checks (`--deploy`) include `rebac.W101` for `SPICEDB_TLS = False`.
 
@@ -559,7 +560,12 @@ class YourAppConfig(AppConfig):
     }
 ```
 
-**Superuser bypass.** Preserved by default for operational ergonomics: `is_superuser=True` short-circuits `has_perm` to `True`. Toggle via `REBAC_SUPERUSER_BYPASS = False` for strict tenants.
+**Superuser bypass.** Preserved by default for operational ergonomics. When `REBAC_SUPERUSER_BYPASS = True` (default) and the user is an *active* superuser, two surfaces short-circuit:
+
+1. `RebacBackend.has_perm(user, perm[, obj])` returns `True` immediately (this section's existing behaviour). Used by Django admin's "can the user see this row / use this app" probes.
+2. `ActorMiddleware` opens a `sudo(reason="superuser-bypass")` bracket for the request lifetime, so `Model.objects.with_actor(superuser).filter(...)` returns every row instead of being narrowed by `accessible()`. This matches the legacy contrib.auth contract that admin sees everything *at the QuerySet layer*, not just at the `has_perm` layer — without it, admin changelist queries would silently filter to "rows the superuser has an explicit relationship to", which is almost never what's wanted.
+
+The middleware path routes through the public `sudo()` API, so each elevated request emits a `KIND_SUDO_BYPASS` audit row (consistent with the strict-mode invariant that bypasses are auditable) and obeys `REBAC_ALLOW_SUDO` — when sudo is globally disabled, the middleware short-circuit is suppressed too (fail-closed: a tenant that turned sudo off shouldn't get an implicit superuser elevation). Strict tenants disable both surfaces by setting `REBAC_SUPERUSER_BYPASS = False`.
 
 ---
 
