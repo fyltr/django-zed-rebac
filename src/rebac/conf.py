@@ -50,6 +50,18 @@ _DEFAULTS: dict[str, Any] = {
     # attacker fuzzing IDs). Switch on for high-stakes deployments where
     # forensic trails of attempted writes outweigh the volume cost.
     "REBAC_AUDIT_DENIALS": False,
+    # Structural lint that walks every RBAC-bound model and emits a
+    # ``rebac.W003`` ``checks.Warning`` for every FK / O2O / M2M
+    # whose target is also RBAC-bound. The check fires for the
+    # *existence* of the relation, not for any actual bare-string
+    # ``prefetch_related`` usage — so it surfaces the JOIN-leak
+    # surface but cannot tell whether callers are already wrapping
+    # those JOINs in ``Prefetch(queryset=Related.objects.with_actor)``.
+    # That makes it noise on a healthy codebase and useful only as a
+    # one-off audit. Opt in with ``REBAC_LINT_BARE_PREFETCH = True``.
+    # When the engine grows true auto-scoping for bare-string
+    # prefetch (planned), this check goes away entirely.
+    "REBAC_LINT_BARE_PREFETCH": False,
 }
 
 
