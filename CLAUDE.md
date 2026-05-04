@@ -117,6 +117,19 @@ design that prevents the worst data-leakage bug class.
   Both write a structured audit-log event.
 - Empty `sudo()` calls without `reason` raise when
   `REBAC_REQUIRE_SUDO_REASON = True` (default).
+- **Superuser carve-out.** When `REBAC_SUPERUSER_BYPASS = True` (default),
+  two surfaces short-circuit for active superusers: (a)
+  `RebacBackend.has_perm` returns `True` immediately, and (b)
+  `ActorMiddleware` opens a `sudo(reason="superuser-bypass")` bracket for
+  the request lifetime so QuerySet `accessible()` scoping also lifts —
+  matching the contrib.auth contract that admin sees every row. The
+  middleware path routes through the public `sudo()`, so each elevated
+  request emits a `KIND_SUDO_BYPASS` audit row and obeys
+  `REBAC_ALLOW_SUDO` (when sudo is globally disabled, the bypass is
+  suppressed — fail-closed). Tenants that don't want either short-circuit
+  set `REBAC_SUPERUSER_BYPASS = False`. **Don't** add a third superuser
+  shortcut anywhere else (e.g. inside the manager or the engine itself);
+  the two existing surfaces are the entire carve-out.
 
 ### 4. Three-state `CheckResult`
 
