@@ -124,7 +124,17 @@ def check_cross_rbac_relations(app_configs: Any = None, **kwargs: Any) -> list[c
     ``Prefetch(queryset=Related.objects.with_actor(actor))`` form. This check
     surfaces every such relation at startup so the JOIN-leak surface is
     greppable. Reverse accessors are out of scope for v1.
+
+    Off by default because the warning fires for the *existence* of the
+    relation, not for any actual bare-string usage — on a healthy
+    codebase that already wraps prefetches in
+    ``Prefetch(queryset=...with_actor(actor))`` the check is pure noise
+    and drowns real warnings. Opt in by setting
+    ``REBAC_LINT_BARE_PREFETCH = True`` when you want the one-off audit.
     """
+    if not app_settings.REBAC_LINT_BARE_PREFETCH:
+        return []
+
     from django.apps import apps
     from django.db import models
 

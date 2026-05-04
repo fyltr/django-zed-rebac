@@ -5,7 +5,8 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any
 
-from .actors import _current_actor, get_actor_resolver
+from .actors import _current_actor, get_actor_resolver, sudo
+from .conf import app_settings
 
 
 class ActorMiddleware:
@@ -13,6 +14,25 @@ class ActorMiddleware:
     `current_actor()` ContextVar for the duration of the request.
 
     Add to MIDDLEWARE *after* `AuthenticationMiddleware`.
+
+    Superuser bypass: when ``REBAC_SUPERUSER_BYPASS`` and
+    ``REBAC_ALLOW_SUDO`` are both True (the defaults) and the request
+    user is an active superuser, the request runs inside a
+    ``sudo(reason="superuser-bypass")`` bracket. This mirrors the
+    bypass that ``rebac.backends.auth.RebacBackend.has_perm`` already
+    applies to ``user.has_perm(perm, obj)`` checks, but at the
+    QuerySet layer:
+    ``Model.objects.with_actor(superuser).filter(...)`` returns every
+    row instead of ``accessible()``-scoped, matching the legacy
+    contrib.auth contract that admin sees everything.
+
+    Routing through the public ``sudo()`` context manager means each
+    superuser request emits a ``KIND_SUDO_BYPASS`` audit row — that's
+    the auditability cost of the elevated scope. Tenants that want to
+    suppress the bypass (and therefore the audit volume) flip
+    ``REBAC_SUPERUSER_BYPASS = False``; tenants that disable sudo
+    globally (``REBAC_ALLOW_SUDO = False``) get neither bypass nor
+    audit row, which is the right fail-closed behaviour.
     """
 
     def __init__(self, get_response: Callable[[Any], Any]) -> None:
@@ -21,9 +41,19 @@ class ActorMiddleware:
     def __call__(self, request: Any) -> Any:
         resolver = get_actor_resolver()
         actor_ref = resolver(request)
-        token = _current_actor.set(actor_ref)
+        actor_token = _current_actor.set(actor_ref)
+        user = getattr(request, "user", None)
+        use_sudo = (
+            app_settings.REBAC_SUPERUSER_BYPASS
+            and app_settings.REBAC_ALLOW_SUDO
+            and user is not None
+            and getattr(user, "is_active", False)
+            and getattr(user, "is_superuser", False)
+        )
         try:
-            response = self.get_response(request)
+            if use_sudo:
+                with sudo(reason="superuser-bypass"):
+                    return self.get_response(request)
+            return self.get_response(request)
         finally:
-            _current_actor.reset(token)
-        return response
+            _current_actor.reset(actor_token)

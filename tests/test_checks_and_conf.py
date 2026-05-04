@@ -43,6 +43,7 @@ def test_actor_middleware_requires_authentication_middleware_present():
 # ---------------------------------------------------------------------------
 
 
+@override_settings(REBAC_LINT_BARE_PREFETCH=True)
 def test_w003_fires_for_rbac_to_rbac_fk_in_testapp():
     """``Post.folder`` (RBAC) → ``Folder`` (RBAC) and ``Folder.parent``
     (self-FK) both fire W003 against the real testapp models."""
@@ -58,6 +59,12 @@ def test_w003_fires_for_rbac_to_rbac_fk_in_testapp():
         assert issue.hint is not None
         assert "Prefetch(" in issue.hint
         assert ".with_actor(actor)" in issue.hint
+
+
+def test_w003_off_by_default():
+    """``REBAC_LINT_BARE_PREFETCH`` defaults to False — the check must
+    early-return [] without walking the model graph."""
+    assert check_cross_rbac_relations() == []
 
 
 def _make_field(name, related_model, kind):
@@ -87,6 +94,7 @@ def _make_model(app_label, name, *, rebac_type, fields):
     return cls
 
 
+@override_settings(REBAC_LINT_BARE_PREFETCH=True)
 def test_w003_does_not_fire_for_fk_to_non_rbac_model():
     """An RBAC-bound model with an FK to a non-RBAC target (e.g. ``auth.User``)
     must NOT trip W003."""
@@ -102,6 +110,7 @@ def test_w003_does_not_fire_for_fk_to_non_rbac_model():
     assert not any("blog.Article.author" in i.msg for i in w003), [i.msg for i in w003]
 
 
+@override_settings(REBAC_LINT_BARE_PREFETCH=True)
 def test_w003_does_not_fire_for_non_rbac_model_pointing_at_rbac():
     """The warning is about RBAC→RBAC traversal only. A non-RBAC source
     pointing at an RBAC target must NOT trip W003."""
