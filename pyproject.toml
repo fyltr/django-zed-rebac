@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "django-zed-rebac"
-version = "0.1.2a0"
+version = "0.1.3"
 description = "Drop-in REBAC engine for Django, SpiceDB-compatible, with a pure-Django LocalBackend."
 readme = "README.md"
 license = { text = "Apache-2.0" }
@@ -85,6 +85,7 @@ ignore_missing_imports = true
 "src/rebac/__init__.py" = ["E402", "RUF022"]
 # Django Meta options (indexes, constraints, ordering, operations) MUST be class-level
 # lists/sets/tuples — that's the framework's convention.
+"src/rebac/admin.py" = ["RUF012"]
 "src/rebac/models/*.py" = ["RUF012"]
 "src/rebac/migrations/*.py" = ["RUF012"]
 "tests/testapp/migrations/*.py" = ["I001", "RUF012"]

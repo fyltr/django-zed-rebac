@@ -9,7 +9,7 @@ Scope per ARCHITECTURE.md § SchemaOverride:
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, ClassVar
+from typing import TYPE_CHECKING, Any
 
 from django.contrib import admin
 from django.db.models import QuerySet
@@ -80,11 +80,11 @@ class SchemaOverrideAdmin(admin.ModelAdmin):
         "expires_at",
     )
     list_filter = ("kind", "created_at")
-    list_select_related: ClassVar = ["target_ct", "created_by"]
+    list_select_related = ["target_ct", "created_by"]
     search_fields = ("expression", "reason")
     readonly_fields = ("created_by", "created_at")
     date_hierarchy = "created_at"
-    fieldsets: ClassVar = (
+    fieldsets = (
         (
             None,
             {"fields": ("kind", "target_ct", "target_pk", "expression")},
@@ -198,20 +198,20 @@ class PermissionAuditEventAdmin(_ReadOnlyAdmin):
 class SchemaRelationInline(_ReadOnlyTabularInline):
     model = SchemaRelation
     fields = ("name", "allowed_subjects", "caveat", "with_expiration")
-    readonly_fields: ClassVar = ["name", "allowed_subjects", "caveat", "with_expiration"]
+    readonly_fields = ["name", "allowed_subjects", "caveat", "with_expiration"]
 
 
 class SchemaPermissionInline(_ReadOnlyTabularInline):
     model = SchemaPermission
     fields = ("name", "expression")
-    readonly_fields: ClassVar = ["name", "expression"]
+    readonly_fields = ["name", "expression"]
 
 
 @admin.register(SchemaDefinition)
 class SchemaDefinitionAdmin(_ReadOnlyAdmin):
     list_display = ("resource_type",)
     search_fields = ("resource_type",)
-    inlines: ClassVar = [SchemaRelationInline, SchemaPermissionInline]
+    inlines = [SchemaRelationInline, SchemaPermissionInline]
 
 
 @admin.register(SchemaCaveat)
