@@ -1,0 +1,69 @@
+name: Publish to PyPI
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: publish-pypi-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Build and publish
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Verify release version
+        run: |
+          python - <<'PY'
+          import os
+          import pathlib
+          import re
+          import sys
+          import tomllib
+
+          expected = os.environ["GITHUB_REF_NAME"].removeprefix("v")
+
+          with pathlib.Path("pyproject.toml").open("rb") as handle:
+              project_version = tomllib.load(handle)["project"]["version"]
+
+          init_text = pathlib.Path("src/rebac/__init__.py").read_text(
+              encoding="utf-8"
+          )
+          match = re.search(r'^__version__ = "([^"]+)"$', init_text, re.M)
+          package_version = match.group(1) if match else None
+
+          versions = {
+              "tag": expected,
+              "pyproject.toml": project_version,
+              "src/rebac/__init__.py": package_version,
+          }
+          if len(set(versions.values())) != 1:
+              for name, version in versions.items():
+                  print(f"{name}: {version}")
+              print("Release versions must match.")
+              sys.exit(1)
+          PY
+
+      - name: Build distributions
+        run: uv build --out-dir dist
+
+      - name: Publish distributions
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          password: ${{ secrets.PYPI_TOKEN }}
