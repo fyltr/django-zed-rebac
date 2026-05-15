@@ -327,7 +327,11 @@ class RebacManager(models.Manager.from_queryset(RebacQuerySet)):  # type: ignore
     """Manager backed by `RebacQuerySet`."""
 
     def get_queryset(self) -> RebacQuerySet:  # type: ignore[override]
-        return RebacQuerySet(model=self.model, using=self._db, hints=self._hints)
+        return self._queryset_class(
+            model=self.model,
+            using=self._db,
+            hints=self._hints,
+        )
 
     def with_actor(self, actor: Any) -> RebacQuerySet:
         return self.get_queryset().with_actor(actor)
