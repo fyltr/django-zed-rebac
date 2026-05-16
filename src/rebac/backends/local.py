@@ -37,6 +37,7 @@ from threading import Lock
 from ..conf import app_settings
 from ..errors import PermissionDepthExceeded
 from ..schema.ast import (
+    BUILTIN_ACTOR_TYPES,
     AllowedSubject,
     Definition,
     PermArrow,
@@ -252,6 +253,36 @@ class LocalBackend(Backend):
             )
         )
 
+    def grants_all(
+        self,
+        *,
+        subject: SubjectRef,
+        action: str,
+        resource_type: str,
+        context: dict | None = None,
+    ) -> bool:
+        """Return True when the schema grants every row of a type.
+
+        `accessible()` can enumerate relationship-derived grants, but a
+        schema-level term like `permission list = authenticated` has no
+        relationship rows to enumerate. QuerySet integration uses this
+        predicate to skip adding an id filter when the permission expression
+        itself grants the whole resource type to the actor.
+        """
+        del context
+        definition = self.schema().get_definition(resource_type)
+        if definition is None:
+            return False
+        permission = self.schema().get_permission(resource_type, action)
+        if permission is None:
+            return False
+        return self._expr_grants_all(
+            permission.expression,
+            definition,
+            subject,
+            seen=set(),
+        )
+
     def lookup_subjects(
         self,
         *,
@@ -358,6 +389,8 @@ class LocalBackend(Backend):
         if isinstance(expr, PermNil):
             return False
         if isinstance(expr, PermRef):
+            if expr.name in BUILTIN_ACTOR_TYPES:
+                return _builtin_actor_matches(expr.name, subject)
             relation = _find_relation(definition, expr.name)
             if relation is not None:
                 return self._has_direct_relation(
@@ -445,6 +478,57 @@ class LocalBackend(Backend):
                     expr.right, definition, resource_id, subject, depth, context, missing
                 )
                 return _minus(left, right)
+            raise ValueError(f"unknown operator: {expr.op}")
+        raise TypeError(f"unknown PermExpr: {expr!r}")
+
+    def _expr_grants_all(
+        self,
+        expr: PermExpr,
+        definition: Definition,
+        subject: SubjectRef,
+        *,
+        seen: set[tuple[str, str]],
+    ) -> bool:
+        if isinstance(expr, PermNil):
+            return False
+        if isinstance(expr, PermRef):
+            if expr.name in BUILTIN_ACTOR_TYPES:
+                return _builtin_actor_matches(expr.name, subject)
+            relation = _find_relation(definition, expr.name)
+            if relation is not None:
+                return False
+            key = (definition.resource_type, expr.name)
+            if key in seen:
+                return False
+            sub_perm = next((p for p in definition.permissions if p.name == expr.name), None)
+            if sub_perm is None:
+                return False
+            return self._expr_grants_all(
+                sub_perm.expression,
+                definition,
+                subject,
+                seen={*seen, key},
+            )
+        if isinstance(expr, PermArrow):
+            return False
+        if isinstance(expr, PermBinOp):
+            left = self._expr_grants_all(expr.left, definition, subject, seen=seen)
+            if expr.op == "+":
+                return left or self._expr_grants_all(
+                    expr.right,
+                    definition,
+                    subject,
+                    seen=seen,
+                )
+            if expr.op == "&":
+                return left and self._expr_grants_all(
+                    expr.right,
+                    definition,
+                    subject,
+                    seen=seen,
+                )
+            if expr.op == "-":
+                return False
             raise ValueError(f"unknown operator: {expr.op}")
         raise TypeError(f"unknown PermExpr: {expr!r}")
 
@@ -604,6 +688,12 @@ class LocalBackend(Backend):
         if isinstance(expr, PermNil):
             return set()
         if isinstance(expr, PermRef):
+            if expr.name in BUILTIN_ACTOR_TYPES:
+                # `accessible()` has no model table from which to enumerate a
+                # schema-level grant. QuerySet integration can treat a matching
+                # built-in actor term as "no row-level narrowing"; direct
+                # backend enumeration remains relationship-row based.
+                return set()
             relation = _find_relation(definition, expr.name)
             if relation is not None:
                 return self._resources_via_relation(
@@ -795,6 +885,21 @@ def _find_relation(definition: Definition, name: str) -> Relation | None:
         if r.name == name:
             return r
     return None
+
+
+def _builtin_actor_matches(name: str, subject: SubjectRef) -> bool:
+    if name == "anonymous":
+        return (
+            subject.subject_type == "anonymous"
+            and subject.subject_id == "*"
+            and not subject.optional_relation
+        )
+    if name == "authenticated":
+        return subject.subject_type != "anonymous" and subject.subject_id not in {
+            "",
+            "anonymous",
+        }
+    return False
 
 
 def _collect_direct_relations(expr: PermExpr) -> set[str]:

@@ -152,9 +152,17 @@ class RebacQuerySet(models.QuerySet):
         from .backends import backend
 
         action = getattr(self.model._meta, "rebac_default_action", "read")
+        active_backend = backend()
+        grants_all = getattr(active_backend, "grants_all", None)
+        if callable(grants_all) and grants_all(
+            subject=actor,
+            action=action,
+            resource_type=rebac_type,
+        ):
+            return
         ids = list(
             accessible_cached(
-                backend(),
+                active_backend,
                 subject=actor,  # type: ignore[arg-type]
                 action=action,
                 resource_type=rebac_type,

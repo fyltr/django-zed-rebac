@@ -136,6 +136,23 @@ permission read = owner - banned                 // exclusion
 permission read = owner + parent->read           // arrow (recurse)
 ```
 
+Two built-in actor terms may appear directly in permission
+expressions:
+
+```zed
+definition auth/user {
+    permission credential_lookup = anonymous + authenticated
+}
+```
+
+`anonymous` matches the global unauthenticated actor
+(`anonymous:*`). `authenticated` matches any resolved non-anonymous
+subject (`auth/user:<id>`, `auth/service:<id>`, `auth/apikey:<id>`,
+and similar). They are schema-level grants: do not declare
+`definition anonymous`, `definition authenticated`, `relation
+anonymous: ...`, `relation authenticated: ...`, or relationship rows
+whose subject type is either built-in actor.
+
 **Operators**:
 
 | Op | Meaning |

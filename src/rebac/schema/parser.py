@@ -13,6 +13,7 @@ import re
 from dataclasses import dataclass
 
 from .ast import (
+    BUILTIN_ACTOR_TYPES,
     AllowedSubject,
     Caveat,
     CaveatParam,
@@ -454,11 +455,27 @@ def validate_schema(schema: Schema) -> list[str]:
     caveat_names = {c.name for c in schema.caveats}
 
     for definition in schema.definitions:
+        if definition.resource_type in BUILTIN_ACTOR_TYPES:
+            errors.append(
+                f"{definition.resource_type!r} is a reserved built-in actor "
+                "and cannot be declared as a definition"
+            )
         relation_names = {r.name for r in definition.relations}
         permission_names = {p.name for p in definition.permissions}
 
         for relation in definition.relations:
+            if relation.name in BUILTIN_ACTOR_TYPES:
+                errors.append(
+                    f"{definition.resource_type}#{relation.name}: "
+                    "reserved built-in actors cannot be declared as relations"
+                )
             for sub in relation.allowed_subjects:
+                if sub.type in BUILTIN_ACTOR_TYPES:
+                    errors.append(
+                        f"{definition.resource_type}#{relation.name}: "
+                        f"reserved built-in actor {sub.type!r} is valid only "
+                        "inside permission expressions"
+                    )
                 # Cross-package references are validated at sync time, not here —
                 # we don't know what other packages are loaded. We DO check that
                 # caveat names referenced inline exist (when present in the same file).
@@ -492,6 +509,8 @@ def _validate_expr(
     if isinstance(expr, PermNil):
         return errors
     if isinstance(expr, PermRef):
+        if expr.name in BUILTIN_ACTOR_TYPES:
+            return errors
         if expr.name not in relation_names and expr.name not in permission_names:
             errors.append(
                 f"{definition.resource_type}: undefined reference {expr.name!r} in expression"

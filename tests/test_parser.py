@@ -149,6 +149,41 @@ def test_nil_permission():
     assert isinstance(perm.expression, PermNil)
 
 
+def test_builtin_actor_terms_are_valid_permission_refs():
+    schema = parse_zed(
+        """
+        definition auth/user {
+            permission credential_lookup = anonymous + authenticated
+        }
+        """
+    )
+
+    assert validate_schema(schema) == []
+    perm = schema.get_permission("auth/user", "credential_lookup")
+    assert isinstance(perm.expression, PermBinOp)
+    assert perm.expression.left == PermRef("anonymous")
+    assert perm.expression.right == PermRef("authenticated")
+
+
+def test_builtin_actor_names_are_reserved_outside_permission_rhs():
+    schema = parse_zed(
+        """
+        definition anonymous {}
+
+        definition auth/user {
+            relation anonymous: auth/user
+            relation public: authenticated:*
+            permission read = anonymous
+        }
+        """
+    )
+
+    errors = validate_schema(schema)
+    assert any("cannot be declared as a definition" in error for error in errors)
+    assert any("cannot be declared as relations" in error for error in errors)
+    assert any("valid only inside permission expressions" in error for error in errors)
+
+
 def test_validate_schema_detects_undefined_reference():
     schema = parse_zed(
         """

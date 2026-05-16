@@ -15,6 +15,8 @@ from __future__ import annotations
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 
+BUILTIN_ACTOR_TYPES = frozenset({"anonymous", "authenticated"})
+
 
 @dataclass(frozen=True, slots=True)
 class AllowedSubject:

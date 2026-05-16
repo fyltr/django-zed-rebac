@@ -144,6 +144,12 @@ The same flow works in DRF, Celery tasks, MCP tools, and management commands. Se
 | **Permission** | A computed expression over relations. Never stored, always evaluated. | `permission read = owner + viewer` |
 | **Caveat** | A CEL expression evaluated at check time against runtime context. | `permission read = viewer with ip_in_cidr` |
 
+Two built-in actor terms, `anonymous` and `authenticated`, may appear
+directly in permission expressions. They are schema-level grants, not
+relationship rows and not user-declared definitions. `anonymous`
+matches `anonymous:*`; `authenticated` matches any non-anonymous
+resolved subject.
+
 The fundamental check operation: `check_access(subject, action, resource, context)` returns one of:
 
 - `HAS_PERMISSION` — granted.

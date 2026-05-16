@@ -115,6 +115,50 @@ def test_wildcard_grants_read_to_anyone(backend):
     assert backend.has_access(subject=_user("u_anything"), action="read", resource=_post("p4"))
 
 
+def test_schema_level_builtin_actor_grants(db):
+    backend = LocalBackend()
+    backend.set_schema(
+        parse_zed(
+            """
+            definition auth/user {}
+
+            definition auth_oidc/provider {
+                permission list = anonymous + authenticated
+                permission preauth = anonymous
+                permission signed_in = authenticated
+            }
+            """
+        )
+    )
+    provider = ObjectRef("auth_oidc/provider", "google")
+    anonymous = SubjectRef.of("anonymous", "*")
+    alice = SubjectRef.of("auth/user", "alice")
+    service = SubjectRef.of("auth/service", "worker")
+
+    assert backend.has_access(subject=anonymous, action="list", resource=provider)
+    assert backend.has_access(subject=alice, action="list", resource=provider)
+    assert backend.has_access(subject=service, action="list", resource=provider)
+    assert backend.has_access(subject=anonymous, action="preauth", resource=provider)
+    assert not backend.has_access(subject=alice, action="preauth", resource=provider)
+    assert backend.has_access(subject=alice, action="signed_in", resource=provider)
+    assert not backend.has_access(subject=anonymous, action="signed_in", resource=provider)
+    assert backend.grants_all(
+        subject=anonymous,
+        action="list",
+        resource_type="auth_oidc/provider",
+    )
+    assert backend.grants_all(
+        subject=alice,
+        action="signed_in",
+        resource_type="auth_oidc/provider",
+    )
+    assert not backend.grants_all(
+        subject=anonymous,
+        action="signed_in",
+        resource_type="auth_oidc/provider",
+    )
+
+
 def test_arrow_propagates_via_folder(backend):
     # u6 is folder owner; post p5 is in that folder; p5#read should resolve via folder->read.
     backend.write_relationships(
