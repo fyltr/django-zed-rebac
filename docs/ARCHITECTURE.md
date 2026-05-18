@@ -263,7 +263,10 @@ from rebac import (
     is_anonymous_actor,                 # predicate
 
     # Convenience helpers
-    write_relationships, delete_relationships, backend,
+    write_relationships, delete_relationships, delete_relationship, backend,
+
+    # Composable resolvers (0.3.1+)
+    chain_resolvers, bearer_token,
 
     # Settings (advanced)
     app_settings,
@@ -826,7 +829,22 @@ class Backend(ABC):
         """Atomically commit relationship rows. Returns a consistency token."""
 
     def delete_relationships(self, filter_: RelationshipFilter) -> Zookie:
-        """Atomically delete matching relationship rows."""
+        """Atomically delete matching relationship rows.
+
+        Every field on ``RelationshipFilter`` uses wildcard-on-empty
+        semantics — an empty value means "don't filter on this column"."""
+
+    def delete_relationship(self, tuple_: RelationshipTuple) -> Zookie:
+        """Atomically delete one tuple shape (exact-match on every field).
+
+        Diverges from authzed.api.v1 by intent: SpiceDB expresses
+        tuple-shaped deletes via ``WriteRelationships`` with
+        ``OPERATION_DELETE``. Adding a dedicated verb keeps the local
+        ergonomics — empty ``optional_subject_relation`` / ``caveat_name``
+        as exact values rather than wildcards — without forcing every
+        caller to construct an updates-with-operation list. Planned to be
+        lowered through ``WriteRelationships`` in 0.4 once the ABC
+        accepts operation-shaped updates."""
 ```
 
 `CheckResult` is `(allowed: bool, conditional_on: list[str], reason: str | None)`. The `conditional_on` field lists caveat parameter names whose context wasn't supplied — the caller may retry.

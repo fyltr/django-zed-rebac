@@ -158,6 +158,50 @@ def test_delete_relationship_matches_empty_optional_relation_exactly(backend):
     ).exists()
 
 
+def test_delete_relationships_filters_by_caveat_name(backend):
+    from rebac.types import RelationshipFilter
+
+    plain = RelationshipTuple(
+        resource=_post("p-filter"),
+        relation="viewer",
+        subject=_user("u-filter"),
+    )
+    business = RelationshipTuple(
+        resource=_post("p-filter"),
+        relation="viewer",
+        subject=_user("u-filter"),
+        caveat_name="during_business_hours",
+    )
+    weekend = RelationshipTuple(
+        resource=_post("p-filter"),
+        relation="viewer",
+        subject=_user("u-filter"),
+        caveat_name="weekend_only",
+    )
+
+    backend.write_relationships([plain, business, weekend])
+    # Filter targeting one specific caveat must touch only that row, leaving
+    # the plain (empty-caveat) row and the other-caveat row alive.
+    backend.delete_relationships(
+        RelationshipFilter(
+            resource_type="blog/post",
+            resource_id="p-filter",
+            relation="viewer",
+            subject_type="auth/user",
+            subject_id="u-filter",
+            caveat_name="during_business_hours",
+        )
+    )
+
+    remaining = sorted(
+        Relationship.objects.filter(
+            resource_type="blog/post",
+            resource_id="p-filter",
+        ).values_list("caveat_name", flat=True)
+    )
+    assert remaining == ["", "weekend_only"]
+
+
 def test_wildcard_grants_read_to_anyone(backend):
     backend.write_relationships(
         [

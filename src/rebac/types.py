@@ -158,7 +158,13 @@ class RelationshipTuple:
 
 @dataclass(frozen=True, slots=True)
 class RelationshipFilter:
-    """Filter for `delete_relationships` and similar lookups."""
+    """Filter for `delete_relationships` and similar lookups.
+
+    Every field uses **wildcard-on-empty** semantics: an empty string means
+    "don't filter on this column". To delete exactly one tuple shape where
+    e.g. ``caveat_name`` is genuinely empty, use
+    :func:`rebac.relationships.delete_relationship` (singular) instead.
+    """
 
     resource_type: str = ""
     resource_id: str = ""
@@ -166,3 +172,4 @@ class RelationshipFilter:
     subject_type: str = ""
     subject_id: str = ""
     optional_subject_relation: str = ""
+    caveat_name: str = ""

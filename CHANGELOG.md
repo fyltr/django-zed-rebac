@@ -3,6 +3,48 @@
 All notable changes to `django-zed-rebac` are tracked here. The project is in
 pre-1.0; breaking changes within a minor version are explicitly called out.
 
+## [0.3.2] — 2026-05-18
+
+Follow-up patch addressing review findings against 0.3.1.
+
+### Added
+
+- **`RelationshipFilter.caveat_name`** — filter form is now
+  caveat-aware (wildcard-on-empty, same as the other fields).
+  Closes the gap where 0.3.1 added a singular caveat-exact delete
+  but the plural/filter form still couldn't target by caveat at all.
+- **Audit target string includes caveat** — `_format_target` now
+  appends ` with <caveat_name>` when the relationship is caveated, so
+  grants/revokes of caveated rows are distinguishable in the audit
+  log from their uncaveated counterparts.
+
+### Changed
+
+- **`rebac.roles.grant` / `imply` wrap write + read-back in
+  `transaction.atomic()`** — closes the `Relationship.DoesNotExist`
+  window where a concurrent `revoke` between the upsert and the
+  follow-up `.get()` could surface a spurious exception.
+- **`rebac.roles.revoke` / `unimply` wrap presence-check + delete in
+  `transaction.atomic()`** — the returned `0`/`1` count is now
+  consistent within the same transaction snapshot rather than
+  best-effort across two queries.
+- **`LocalBackend.delete_relationship` / `delete_relationships` wrap
+  their operations in `transaction.atomic()`** — for parity with
+  `write_relationships` and to make the snapshot-then-delete sequence
+  in the public helpers atomic with the backend write.
+- **`chain_resolvers` docstring no longer claims pickle-safety** —
+  the returned closure is not actually picklable. Re-clarified as
+  intended for module-level assignment + dotted-import via
+  `REBAC_ACTOR_RESOLVER`.
+
+### Documentation
+
+- `docs/ARCHITECTURE.md` public-API surface now lists
+  `delete_relationship`, `chain_resolvers`, `bearer_token` and notes
+  the deliberate SpiceDB divergence of singular
+  `Backend.delete_relationship` (to be lowered through
+  `WriteRelationships` with `OPERATION_DELETE` in 0.4).
+
 ## [0.3.1] — 2026-05-18
 
 ### Added — composable actor resolvers

@@ -179,6 +179,8 @@ def grant(*, actor: ActorLike, role: str | ObjectRef) -> Relationship:
 
     Returns the :class:`Relationship` row (newly created or pre-existing).
     """
+    from django.db import transaction
+
     from .models import active_relationship_model
     from .relationships import write_relationships
 
@@ -186,24 +188,27 @@ def grant(*, actor: ActorLike, role: str | ObjectRef) -> Relationship:
 
     actor_ref = to_subject_ref(actor)
     role_ref = _parse_role(role)
-    write_relationships(
-        [
-            RelationshipTuple(
-                resource=role_ref,
-                relation=ROLE_RELATION,
-                subject=actor_ref,
-            )
-        ]
-    )
-    return Relationship.objects.get(
-        resource_type=role_ref.resource_type,
-        resource_id=role_ref.resource_id,
-        relation=ROLE_RELATION,
-        subject_type=actor_ref.subject_type,
-        subject_id=actor_ref.subject_id,
-        optional_subject_relation=actor_ref.optional_relation,
-        caveat_name="",
-    )
+    # Wrap write + read-back in one atomic so a concurrent revoke between
+    # the upsert and the .get() can't surface as DoesNotExist.
+    with transaction.atomic():
+        write_relationships(
+            [
+                RelationshipTuple(
+                    resource=role_ref,
+                    relation=ROLE_RELATION,
+                    subject=actor_ref,
+                )
+            ]
+        )
+        return Relationship.objects.get(
+            resource_type=role_ref.resource_type,
+            resource_id=role_ref.resource_id,
+            relation=ROLE_RELATION,
+            subject_type=actor_ref.subject_type,
+            subject_id=actor_ref.subject_id,
+            optional_subject_relation=actor_ref.optional_relation,
+            caveat_name="",
+        )
 
 
 def revoke(*, actor: ActorLike, role: str | ObjectRef) -> int:
@@ -213,6 +218,8 @@ def revoke(*, actor: ActorLike, role: str | ObjectRef) -> int:
     otherwise — the unique constraint on :class:`Relationship` guarantees
     at most one matching row).
     """
+    from django.db import transaction
+
     from .models import active_relationship_model
     from .relationships import delete_relationship
 
@@ -220,22 +227,26 @@ def revoke(*, actor: ActorLike, role: str | ObjectRef) -> int:
 
     actor_ref = to_subject_ref(actor)
     role_ref = _parse_role(role)
-    exists = Relationship.objects.filter(
-        resource_type=role_ref.resource_type,
-        resource_id=role_ref.resource_id,
-        relation=ROLE_RELATION,
-        subject_type=actor_ref.subject_type,
-        subject_id=actor_ref.subject_id,
-        optional_subject_relation=actor_ref.optional_relation,
-        caveat_name="",
-    ).exists()
-    delete_relationship(
-        RelationshipTuple(
-            resource=role_ref,
+    # Wrap presence-check + delete in one atomic so the returned count
+    # reflects the same row state both operations saw — otherwise a
+    # concurrent grant/revoke between the two queries can make this lie.
+    with transaction.atomic():
+        exists = Relationship.objects.filter(
+            resource_type=role_ref.resource_type,
+            resource_id=role_ref.resource_id,
             relation=ROLE_RELATION,
-            subject=actor_ref,
+            subject_type=actor_ref.subject_type,
+            subject_id=actor_ref.subject_id,
+            optional_subject_relation=actor_ref.optional_relation,
+            caveat_name="",
+        ).exists()
+        delete_relationship(
+            RelationshipTuple(
+                resource=role_ref,
+                relation=ROLE_RELATION,
+                subject=actor_ref,
+            )
         )
-    )
     return 1 if exists else 0
 
 
@@ -324,6 +335,8 @@ def imply(*, parent: str | ObjectRef, child: str | ObjectRef) -> Relationship:
         # Now any member of storage/role:object_admin is also an
         # effective member of storage/role:object_editor.
     """
+    from django.db import transaction
+
     from .models import active_relationship_model
     from .relationships import write_relationships
 
@@ -340,16 +353,18 @@ def imply(*, parent: str | ObjectRef, child: str | ObjectRef) -> Relationship:
             ROLE_EFFECTIVE_MEMBER,
         ),
     )
-    write_relationships([tuple_])
-    return Relationship.objects.get(
-        resource_type=parent_ref.resource_type,
-        resource_id=parent_ref.resource_id,
-        relation=ROLE_INCLUDES_RELATION,
-        subject_type=child_ref.resource_type,
-        subject_id=child_ref.resource_id,
-        optional_subject_relation=ROLE_EFFECTIVE_MEMBER,
-        caveat_name="",
-    )
+    # Wrap write + read-back: same DoesNotExist race as ``grant``.
+    with transaction.atomic():
+        write_relationships([tuple_])
+        return Relationship.objects.get(
+            resource_type=parent_ref.resource_type,
+            resource_id=parent_ref.resource_id,
+            relation=ROLE_INCLUDES_RELATION,
+            subject_type=child_ref.resource_type,
+            subject_id=child_ref.resource_id,
+            optional_subject_relation=ROLE_EFFECTIVE_MEMBER,
+            caveat_name="",
+        )
 
 
 def unimply(*, parent: str | ObjectRef, child: str | ObjectRef) -> int:
@@ -357,6 +372,8 @@ def unimply(*, parent: str | ObjectRef, child: str | ObjectRef) -> int:
 
     Returns the number of rows deleted (0 or 1).
     """
+    from django.db import transaction
+
     from .models import active_relationship_model
     from .relationships import delete_relationship
 
@@ -373,16 +390,18 @@ def unimply(*, parent: str | ObjectRef, child: str | ObjectRef) -> int:
             ROLE_EFFECTIVE_MEMBER,
         ),
     )
-    exists = Relationship.objects.filter(
-        resource_type=parent_ref.resource_type,
-        resource_id=parent_ref.resource_id,
-        relation=ROLE_INCLUDES_RELATION,
-        subject_type=child_ref.resource_type,
-        subject_id=child_ref.resource_id,
-        optional_subject_relation=ROLE_EFFECTIVE_MEMBER,
-        caveat_name="",
-    ).exists()
-    delete_relationship(tuple_)
+    # Wrap presence-check + delete: same TOCTOU as ``revoke``.
+    with transaction.atomic():
+        exists = Relationship.objects.filter(
+            resource_type=parent_ref.resource_type,
+            resource_id=parent_ref.resource_id,
+            relation=ROLE_INCLUDES_RELATION,
+            subject_type=child_ref.resource_type,
+            subject_id=child_ref.resource_id,
+            optional_subject_relation=ROLE_EFFECTIVE_MEMBER,
+            caveat_name="",
+        ).exists()
+        delete_relationship(tuple_)
     return 1 if exists else 0
 
 

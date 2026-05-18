@@ -182,6 +182,41 @@ def test_delete_relationships_emits_revoke_per_matched_row():
     ]
 
 
+@pytest.mark.django_db(transaction=True)
+def test_audit_target_repr_includes_caveat_name():
+    """Grants/revokes with a non-empty caveat must render `with <caveat>`."""
+    PermissionAuditEvent.objects.all().delete()
+    caveated = RelationshipTuple(
+        resource=ObjectRef("blog/post", "p-caveat"),
+        relation="viewer",
+        subject=SubjectRef.of("auth/user", "alice"),
+        caveat_name="during_business_hours",
+    )
+
+    with transaction.atomic():
+        write_relationships([caveated])
+    with transaction.atomic():
+        delete_relationships(
+            RelationshipFilter(
+                resource_type="blog/post",
+                resource_id="p-caveat",
+                relation="viewer",
+                subject_type="auth/user",
+                subject_id="alice",
+                caveat_name="during_business_hours",
+            )
+        )
+
+    grant_row = PermissionAuditEvent.objects.get(kind="rel.grant")
+    revoke_row = PermissionAuditEvent.objects.get(kind="rel.revoke")
+    assert grant_row.target_repr == (
+        "blog/post:p-caveat#viewer @ auth/user:alice with during_business_hours"
+    )
+    assert revoke_row.target_repr == (
+        "blog/post:p-caveat#viewer @ auth/user:alice with during_business_hours"
+    )
+
+
 # ---------- denial emission gating ----------
 
 

@@ -492,9 +492,11 @@ def chain_resolvers(
         # In settings.py:
         REBAC_ACTOR_RESOLVER = "myapp.actors.resolve"
 
-    The composed callable is plain and pickle-safe (no closure captures
-    beyond the resolver tuple and the terminal), so it can be assigned
-    to a module-level name and referenced from settings directly.
+    Assign the result to a module-level name and reference it by
+    dotted-path from ``REBAC_ACTOR_RESOLVER``; the setting machinery
+    resolves the name via ``importlib.import_module``, not via pickle,
+    so the composed inner closure never needs to round-trip through
+    ``pickle.dumps``.
     """
 
     chain = tuple(resolvers)

@@ -10,13 +10,19 @@ from .types import RelationshipFilter, RelationshipTuple, Zookie
 def _format_target(tup: RelationshipTuple) -> str:
     """Render a `RelationshipTuple` as the canonical wire string used in audit rows.
 
-    Format:  `<rt>:<id>#<rel> @ <st>:<sid>[#<sr>]`
+    Format: ``<rt>:<id>#<rel> @ <st>:<sid>[#<sr>][ with <caveat>]``. The
+    optional ``with <caveat>`` suffix is appended when ``caveat_name`` is
+    non-empty so caveated grants/revokes are distinguishable in the audit
+    log from their uncaveated counterparts.
     """
     res = f"{tup.resource.resource_type}:{tup.resource.resource_id}#{tup.relation}"
     sub = f"{tup.subject.subject_type}:{tup.subject.subject_id}"
     if tup.subject.optional_relation:
         sub = f"{sub}#{tup.subject.optional_relation}"
-    return f"{res} @ {sub}"
+    target = f"{res} @ {sub}"
+    if tup.caveat_name:
+        target = f"{target} with {tup.caveat_name}"
+    return target
 
 
 def write_relationships(writes: Iterable[RelationshipTuple]) -> Zookie:
@@ -54,6 +60,7 @@ def delete_relationships(filter_: RelationshipFilter) -> Zookie:
     from . import backend
     from .actors import current_actor
     from .audit import emit as emit_audit
+    from .consistency import record_zookie
     from .models import PermissionAuditEvent, active_relationship_model
 
     # Snapshot the matched rows BEFORE the delete so we can audit each row's
@@ -78,6 +85,8 @@ def delete_relationships(filter_: RelationshipFilter) -> Zookie:
         qs = qs.filter(subject_id=filter_.subject_id)
     if filter_.optional_subject_relation:
         qs = qs.filter(optional_subject_relation=filter_.optional_subject_relation)
+    if filter_.caveat_name:
+        qs = qs.filter(caveat_name=filter_.caveat_name)
     is_registry = RelationshipModel.__name__ == "RelationshipRegistry"
     if is_registry:
         snapshot = [
@@ -88,6 +97,7 @@ def delete_relationships(filter_: RelationshipFilter) -> Zookie:
                 "subject_type": row["subject_fk__resource_type"],
                 "subject_id": row["subject_fk__resource_id"],
                 "optional_subject_relation": row["optional_subject_relation"],
+                "caveat_name": row["caveat_name"],
             }
             for row in qs.values(
                 "resource_fk__resource_type",
@@ -96,6 +106,7 @@ def delete_relationships(filter_: RelationshipFilter) -> Zookie:
                 "subject_fk__resource_type",
                 "subject_fk__resource_id",
                 "optional_subject_relation",
+                "caveat_name",
             )
         ]
     else:
@@ -107,6 +118,7 @@ def delete_relationships(filter_: RelationshipFilter) -> Zookie:
                 "subject_type",
                 "subject_id",
                 "optional_subject_relation",
+                "caveat_name",
             )
         )
 
@@ -114,8 +126,6 @@ def delete_relationships(filter_: RelationshipFilter) -> Zookie:
     # Delete is a write — the new state matters for freshness, same as
     # write_relationships above. Record so subsequent reads in scope
     # honour the post-delete state.
-    from .consistency import record_zookie
-
     record_zookie(zookie)
 
     actor = current_actor()
@@ -124,6 +134,8 @@ def delete_relationships(filter_: RelationshipFilter) -> Zookie:
         if row["optional_subject_relation"]:
             sub = f"{sub}#{row['optional_subject_relation']}"
         target = f"{row['resource_type']}:{row['resource_id']}#{row['relation']} @ {sub}"
+        if row["caveat_name"]:
+            target = f"{target} with {row['caveat_name']}"
         emit_audit(
             PermissionAuditEvent.KIND_RELATIONSHIP_REVOKE,
             actor=actor,
@@ -139,10 +151,17 @@ def delete_relationship(tuple_: RelationshipTuple) -> Zookie:
 
     Unlike ``delete_relationships(RelationshipFilter(...))``, empty optional
     subject relations and caveat names are exact values here, not wildcards.
+
+    No direct SpiceDB equivalent — SpiceDB expresses the same intent via
+    ``WriteRelationships`` with an ``OPERATION_DELETE`` update. This helper
+    is therefore local-only today; the plan for 0.4 is to lower it through
+    that path once the backend ABC accepts operation-shaped updates. See
+    ``docs/ARCHITECTURE.md``.
     """
     from . import backend
     from .actors import current_actor
     from .audit import emit as emit_audit
+    from .consistency import record_zookie
     from .models import PermissionAuditEvent, active_relationship_model
 
     RelationshipModel = active_relationship_model()
@@ -158,25 +177,15 @@ def delete_relationship(tuple_: RelationshipTuple) -> Zookie:
         )
     )
     zookie = backend().delete_relationship(tuple_)
-
-    from .consistency import record_zookie
-
     record_zookie(zookie)
 
     actor = current_actor()
-    for row in snapshot:
+    for _row in snapshot:
         emit_audit(
             PermissionAuditEvent.KIND_RELATIONSHIP_REVOKE,
             actor=actor,
             origin=actor,
-            target_repr=_format_target(
-                RelationshipTuple(
-                    resource=tuple_.resource,
-                    relation=tuple_.relation,
-                    subject=tuple_.subject,
-                    caveat_name=getattr(row, "caveat_name", ""),
-                )
-            ),
+            target_repr=_format_target(tuple_),
             defer_to_commit=True,
         )
     return zookie

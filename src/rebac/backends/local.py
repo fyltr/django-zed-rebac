@@ -470,39 +470,54 @@ class LocalBackend(Backend):
         return Zookie(self.kind, str(max_xid))
 
     def delete_relationships(self, filter_: RelationshipFilter) -> Zookie:
+        from django.db import transaction
+
         from ..models import active_relationship_model
 
         RelationshipModel = active_relationship_model()
 
-        qs = RelationshipModel.objects.all()
-        if filter_.resource_type:
-            qs = qs.filter(resource_type=filter_.resource_type)
-        if filter_.resource_id:
-            qs = qs.filter(resource_id=filter_.resource_id)
-        if filter_.relation:
-            qs = qs.filter(relation=filter_.relation)
-        if filter_.subject_type:
-            qs = qs.filter(subject_type=filter_.subject_type)
-        if filter_.subject_id:
-            qs = qs.filter(subject_id=filter_.subject_id)
-        if filter_.optional_subject_relation:
-            qs = qs.filter(optional_subject_relation=filter_.optional_subject_relation)
-        qs.delete()
+        with transaction.atomic():
+            qs = RelationshipModel.objects.all()
+            if filter_.resource_type:
+                qs = qs.filter(resource_type=filter_.resource_type)
+            if filter_.resource_id:
+                qs = qs.filter(resource_id=filter_.resource_id)
+            if filter_.relation:
+                qs = qs.filter(relation=filter_.relation)
+            if filter_.subject_type:
+                qs = qs.filter(subject_type=filter_.subject_type)
+            if filter_.subject_id:
+                qs = qs.filter(subject_id=filter_.subject_id)
+            if filter_.optional_subject_relation:
+                qs = qs.filter(optional_subject_relation=filter_.optional_subject_relation)
+            if filter_.caveat_name:
+                qs = qs.filter(caveat_name=filter_.caveat_name)
+            qs.delete()
         return self._zookie()
 
     def delete_relationship(self, tuple_: RelationshipTuple) -> Zookie:
+        # Local-only convenience verb: exact-match delete for one tuple shape
+        # (treats empty optional_subject_relation / caveat_name as exact
+        # values, where ``delete_relationships`` treats them as wildcards).
+        # Has no direct SpiceDB equivalent; SpiceDB expresses the same intent
+        # via ``WriteRelationships`` with ``OPERATION_DELETE``. Planned to
+        # lower through that path in 0.4 once the ABC takes operation-shaped
+        # updates — see ARCHITECTURE.md.
+        from django.db import transaction
+
         from ..models import active_relationship_model
 
         RelationshipModel = active_relationship_model()
-        RelationshipModel.objects.filter(
-            resource_type=tuple_.resource.resource_type,
-            resource_id=tuple_.resource.resource_id,
-            relation=tuple_.relation,
-            subject_type=tuple_.subject.subject_type,
-            subject_id=tuple_.subject.subject_id,
-            optional_subject_relation=tuple_.subject.optional_relation,
-            caveat_name=tuple_.caveat_name,
-        ).delete()
+        with transaction.atomic():
+            RelationshipModel.objects.filter(
+                resource_type=tuple_.resource.resource_type,
+                resource_id=tuple_.resource.resource_id,
+                relation=tuple_.relation,
+                subject_type=tuple_.subject.subject_type,
+                subject_id=tuple_.subject.subject_id,
+                optional_subject_relation=tuple_.subject.optional_relation,
+                caveat_name=tuple_.caveat_name,
+            ).delete()
         return self._zookie()
 
     # ---------- Internal evaluation ----------
