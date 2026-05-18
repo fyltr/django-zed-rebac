@@ -1,7 +1,8 @@
 # Proposal 0002 — Request-scoped `PermissionEvaluator` + Zookie freshness ContextVar + Strawberry/Channels adapter
 
-**Target version:** v0.4 (additive; default-on for HTTP, opt-in scope for WS).
-**Status:** Draft — pending maintainer approval.
+**Target version:** v0.3 (additive; default-on for HTTP, opt-in scope for WS).
+**Shipped in:** 0.3.0 (2026-05-17).
+**Status:** Approved + landed.
 **Scope:** `LocalBackend` + `SpiceDBBackend`, `actors.py`, `middleware.py`,
 new `rebac.graphql.strawberry` adapter behind a `[strawberry]` extra.
 

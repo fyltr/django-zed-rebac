@@ -1,6 +1,7 @@
 # Proposal 0001 — `RebacResource` registry + integer FK schema for `LocalBackend`
 
-**Target version:** v0.4 (additive; default off; default flip in 0.5).
+**Target version:** v0.3 (additive; default off; default flip in v0.4).
+**Shipped in:** 0.3.0 (2026-05-17).
 **Status:** Approved by upstream maintainer (see *Decisions already locked* below); ready to implement.
 **Scope:** `LocalBackend` only. `SpiceDBBackend` is unaffected.
 
