@@ -56,6 +56,7 @@ class SpiceDBBackend(Backend):
         resource: ObjectRef,
         context: dict | None = None,
         consistency: Consistency | None = None,
+        at_zookie: Zookie | None = None,
     ) -> CheckResult:
         raise NotImplementedError
 
@@ -67,6 +68,7 @@ class SpiceDBBackend(Backend):
         resource_type: str,
         context: dict | None = None,
         consistency: Consistency | None = None,
+        at_zookie: Zookie | None = None,
     ) -> Iterable[str]:
         raise NotImplementedError
 
@@ -78,6 +80,7 @@ class SpiceDBBackend(Backend):
         subject_type: str,
         context: dict | None = None,
         consistency: Consistency | None = None,
+        at_zookie: Zookie | None = None,
     ) -> Iterable[SubjectRef]:
         raise NotImplementedError
 

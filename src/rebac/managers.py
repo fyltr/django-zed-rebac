@@ -158,8 +158,8 @@ class RebacQuerySet(models.QuerySet):
             return
         from django.db.models import Q
 
-        from .actors import accessible_cached
         from .backends import backend
+        from .evaluator import current_evaluator
 
         action = self._rebac_action or getattr(
             self.model._meta,
@@ -174,14 +174,28 @@ class RebacQuerySet(models.QuerySet):
             resource_type=rebac_type,
         ):
             return
-        ids = list(
-            accessible_cached(
-                active_backend,
-                subject=actor,  # type: ignore[arg-type]
-                action=action,
-                resource_type=rebac_type,
+        # Route through the ambient evaluator when one is open
+        # (ActorMiddleware / RebacExtension brackets it); otherwise hit
+        # the backend directly. Proposal 0002 — the legacy
+        # accessible_cached helper is deprecated but kept as an alias.
+        evaluator = current_evaluator()
+        if evaluator is None:
+            ids = list(
+                active_backend.accessible(
+                    subject=actor,  # type: ignore[arg-type]
+                    action=action,
+                    resource_type=rebac_type,
+                )
             )
-        )
+        else:
+            ids = list(
+                evaluator.accessible(
+                    active_backend,
+                    subject=actor,  # type: ignore[arg-type]
+                    action=action,
+                    resource_type=rebac_type,
+                )
+            )
         attr = resource_id_attr(self.model)
         if attr == "pk":
             # Coerce to ints when the PK is integer-typed; leave as
@@ -201,7 +215,9 @@ class RebacQuerySet(models.QuerySet):
                     "PositiveSmallIntegerField",
                 ):
                     ids = [int(i) for i in ids]
-            except ValueError, TypeError:
+            except ValueError:
+                pass
+            except TypeError:
                 pass
         # ``Q.add_q`` works even on sliced queries.
         self.query.add_q(Q(**{f"{attr}__in": ids}))

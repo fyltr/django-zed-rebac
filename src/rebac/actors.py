@@ -10,6 +10,7 @@ ARCHITECTURE.md § Three actor-resolution paths.
 
 from __future__ import annotations
 
+import warnings
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
@@ -35,16 +36,28 @@ if TYPE_CHECKING:
 _current_actor: ContextVar[SubjectRef | None] = ContextVar("rebac_current_actor", default=None)
 _sudo_state: ContextVar[dict[str, Any] | None] = ContextVar("rebac_sudo", default=None)
 
-# Per-request memoisation of `backend().accessible(...)` lookups. Reset
-# whenever the actor or sudo state flips so a single conceptual
-# request (which the middleware brackets via `_current_actor.set/reset`)
-# only walks the relationship graph once per (subject, action,
-# resource_type) triple. The cache rides on a ContextVar — same
-# isolation guarantees as `_current_actor` — so async tasks and
-# Celery workers each get their own.
-_accessible_cache: ContextVar[dict[tuple[Any, str, str], tuple[str, ...]] | None] = ContextVar(
-    "rebac_accessible_cache", default=None
-)
+
+# ---------- Legacy cache helpers (deprecated in 0.4, removed in 0.6) ----------
+#
+# Proposal 0002 unified per-request caching under
+# :class:`rebac.evaluator.PermissionEvaluator`. The three helpers below —
+# ``accessible_cached``, ``enable_accessible_cache``,
+# ``disable_accessible_cache`` — keep their public signatures so existing
+# middleware / custom request hooks keep working, but each delegates to
+# the evaluator and emits a single-shot ``DeprecationWarning`` so
+# downstream callers see the warning at most once per process.
+#
+# Removal in 0.6 alongside the denormalized storage path (proposal 0001).
+
+_LEGACY_WARNED: set[str] = set()
+
+
+def _warn_legacy_once(name: str, message: str) -> None:
+    """Emit a DeprecationWarning at most once per process per call site."""
+    if name in _LEGACY_WARNED:
+        return
+    _LEGACY_WARNED.add(name)
+    warnings.warn(message, DeprecationWarning, stacklevel=3)
 
 
 def accessible_cached(
@@ -56,75 +69,64 @@ def accessible_cached(
     context: dict | None = None,
     consistency: Consistency | None = None,
 ) -> tuple[str, ...]:
-    """Memoised wrapper for ``backend.accessible(...)``.
+    """Deprecated alias for ``current_evaluator().accessible(...)``.
 
-    Cache key: ``(str(subject), action, resource_type)``. Two
-    ``SubjectRef`` instances representing the same actor share a slot
-    via the canonical wire form. The cache rides on a ContextVar so
-    each request / Celery task / async context gets its own.
-
-    Returns a tuple of accessible resource ids in the backend's own
-    order. The cache is opt-in: when no bracket is open
-    (:func:`enable_accessible_cache`) every call goes straight to
-    ``backend.accessible()``.
-
-    Caveat context bypasses the cache: when ``context`` or a
-    non-default ``consistency`` is supplied the result depends on
-    inputs not encoded in the key, so we must not memoise.
+    Kept for 0.4 backward compat; removed in 0.6. New code should call
+    the evaluator directly (or just call ``backend.accessible(...)`` —
+    the evaluator is consulted automatically by the middleware-bracketed
+    request path).
     """
-    if context is not None or consistency is not None:
-        return tuple(
-            backend.accessible(
-                subject=subject,
-                action=action,
-                resource_type=resource_type,
-                context=context,
-                consistency=consistency,
-            )
-        )
-    cache = _accessible_cache.get()
-    if cache is None:
-        return tuple(
-            backend.accessible(
-                subject=subject,
-                action=action,
-                resource_type=resource_type,
-            )
-        )
-    key = (str(subject), action, resource_type)
-    if key in cache:
-        return cache[key]
-    ids = tuple(
-        backend.accessible(
-            subject=subject,
-            action=action,
-            resource_type=resource_type,
-        )
+    _warn_legacy_once(
+        "accessible_cached",
+        "rebac.actors.accessible_cached is deprecated; use "
+        "rebac.evaluator.current_evaluator().accessible(...) instead. "
+        "Will be removed in v0.6.",
     )
-    cache[key] = ids
-    return ids
+    from .evaluator import PermissionEvaluator, current_evaluator
+
+    evaluator = current_evaluator() or PermissionEvaluator()
+    return evaluator.accessible(
+        backend,
+        subject=subject,
+        action=action,
+        resource_type=resource_type,
+        context=context,
+        consistency=consistency,
+    )
 
 
 def enable_accessible_cache() -> Any:
-    """Open a per-request ``accessible()`` cache.
+    """Deprecated alias for opening a :func:`rebac.evaluator.evaluator_scope`.
 
-    Returns the token to pass back to :func:`disable_accessible_cache`
-    so middleware / extension teardown can restore the prior cache
-    state. Safe to call recursively — nested enables stack via the
-    ContextVar's natural set/reset semantics.
-
-    Opt-in by design: consumer middleware brackets a request lifecycle
-    by calling ``enable_accessible_cache`` on entry and
-    ``disable_accessible_cache`` on exit. Do not enable across
-    long-running tasks without periodic disable — the cache dict has
-    no size bound within a bracket.
+    Returns an opaque token compatible with the historic
+    ``disable_accessible_cache`` teardown. Existing middleware that
+    brackets a request with these two calls keeps working; new code
+    should use ``with evaluator_scope(): ...`` instead.
     """
-    return _accessible_cache.set({})
+    _warn_legacy_once(
+        "enable_accessible_cache",
+        "rebac.actors.enable_accessible_cache is deprecated; use "
+        "`with rebac.evaluator.evaluator_scope(): ...` instead. "
+        "Will be removed in v0.6.",
+    )
+    from .evaluator import PermissionEvaluator, _current_evaluator
+
+    return _current_evaluator.set(
+        PermissionEvaluator(max_size=app_settings.REBAC_EVALUATOR_CACHE_SIZE)
+    )
 
 
 def disable_accessible_cache(token: Any) -> None:
-    """Close the cache opened by :func:`enable_accessible_cache`."""
-    _accessible_cache.reset(token)
+    """Deprecated alias for the corresponding ``evaluator_scope`` teardown."""
+    _warn_legacy_once(
+        "disable_accessible_cache",
+        "rebac.actors.disable_accessible_cache is deprecated; use "
+        "`with rebac.evaluator.evaluator_scope(): ...` instead. "
+        "Will be removed in v0.6.",
+    )
+    from .evaluator import _current_evaluator
+
+    _current_evaluator.reset(token)
 
 
 def current_actor() -> SubjectRef | None:

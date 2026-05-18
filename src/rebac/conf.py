@@ -100,6 +100,24 @@ _DEFAULTS: dict[str, Any] = {
     # the two shapes. Lower this on tight-memory hosts; raise it on big
     # transactional DBs where round-trip cost dominates per-row work.
     "REBAC_LOCAL_BACKEND_REGISTRY_BATCH_SIZE": 5000,
+    # Total entries (across both ``check`` and ``accessible`` caches)
+    # the per-request :class:`rebac.evaluator.PermissionEvaluator` holds
+    # before evicting LRU. 10_000 covers the largest realistic GraphQL
+    # query fan-out without risk of OOM under adversarial input. Raise
+    # for workloads that genuinely benefit (rare); lower on
+    # tight-memory hosts.
+    "REBAC_EVALUATOR_CACHE_SIZE": 10_000,
+    # Cross-request transport for the post-write ``Zookie`` so
+    # subsequent reads upgrade to ``at_least_as_fresh``:
+    #   - ``"none"``    — single-request scope only (default).
+    #   - ``"header"``  — request/response header
+    #     (``REBAC_ZOOKIE_HEADER_NAME``). Natural for SPAs / JWT.
+    #   - ``"session"`` — ``request.session`` key
+    #     (``REBAC_ZOOKIE_SESSION_KEY``). Requires
+    #     ``django.contrib.sessions`` (system check ``rebac.W006``).
+    "REBAC_ZOOKIE_TRANSPORT": "none",
+    "REBAC_ZOOKIE_HEADER_NAME": "X-Rebac-Zookie",
+    "REBAC_ZOOKIE_SESSION_KEY": "_rebac_zookie",
 }
 
 

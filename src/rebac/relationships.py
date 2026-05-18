@@ -24,11 +24,18 @@ def write_relationships(writes: Iterable[RelationshipTuple]) -> Zookie:
     from . import backend
     from .actors import current_actor
     from .audit import emit as emit_audit
+    from .consistency import record_zookie
     from .models import PermissionAuditEvent
 
     # Materialise so we can both pass to the backend and audit.
     rows = list(writes)
     zookie = backend().write_relationships(rows)
+    # Stash the post-write Zookie in the ambient ContextVar so subsequent
+    # reads in this scope auto-upgrade to ``at_least_as_fresh`` — closes
+    # the SpiceDB write-then-read staleness window. No-op outside a
+    # zookie_scope (e.g. management commands, Celery without the actor
+    # propagator hook).
+    record_zookie(zookie)
 
     actor = current_actor()
     for tup in rows:
@@ -104,6 +111,12 @@ def delete_relationships(filter_: RelationshipFilter) -> Zookie:
         )
 
     zookie = backend().delete_relationships(filter_)
+    # Delete is a write — the new state matters for freshness, same as
+    # write_relationships above. Record so subsequent reads in scope
+    # honour the post-delete state.
+    from .consistency import record_zookie
+
+    record_zookie(zookie)
 
     actor = current_actor()
     for row in snapshot:

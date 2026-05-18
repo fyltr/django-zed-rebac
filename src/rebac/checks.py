@@ -106,6 +106,48 @@ def check_auth_backend_installed(
 
 
 @checks.register("rebac")
+def check_zookie_transport_setting(
+    app_configs: Any = None, **kwargs: Any
+) -> list[checks.CheckMessage]:
+    """E007 + W006 — validate ``REBAC_ZOOKIE_TRANSPORT`` configuration.
+
+    E007 — value must be one of ``"none" / "header" / "session"``.
+    W006 — ``"session"`` requires ``django.contrib.sessions`` in
+           ``INSTALLED_APPS``; otherwise request handling raises at
+           the session-key access in :meth:`ActorMiddleware._rehydrate_zookie`.
+    """
+    from django.conf import settings
+
+    transport = app_settings.REBAC_ZOOKIE_TRANSPORT
+    issues: list[checks.CheckMessage] = []
+    if transport not in ("none", "header", "session"):
+        issues.append(
+            checks.Error(
+                f"REBAC_ZOOKIE_TRANSPORT={transport!r} (expected 'none', 'header', or 'session')",
+                id="rebac.E007",
+            )
+        )
+        return issues
+    if transport == "session" and "django.contrib.sessions" not in getattr(
+        settings, "INSTALLED_APPS", []
+    ):
+        issues.append(
+            checks.Warning(
+                "REBAC_ZOOKIE_TRANSPORT='session' but "
+                "'django.contrib.sessions' is not in INSTALLED_APPS. "
+                "The middleware will skip Zookie persistence; reads "
+                "won't get the post-write freshness upgrade.",
+                hint=(
+                    "Add 'django.contrib.sessions' to INSTALLED_APPS, "
+                    "or switch to REBAC_ZOOKIE_TRANSPORT='header' / 'none'."
+                ),
+                id="rebac.W006",
+            )
+        )
+    return issues
+
+
+@checks.register("rebac")
 def check_actor_middleware_order(
     app_configs: Any = None, **kwargs: Any
 ) -> list[checks.CheckMessage]:

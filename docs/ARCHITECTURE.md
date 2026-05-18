@@ -968,6 +968,116 @@ MIDDLEWARE = [
 
 The contextvar is exposed as `current_actor()` — works in async views, sync views, ASGI consumers, and DRF viewsets identically.
 
+## Per-request evaluator + Zookie freshness (proposal 0002)
+
+`ActorMiddleware` brackets each request with TWO additional scopes alongside
+the actor ContextVar: an evaluator scope (per-request permission check cache)
+and a Zookie scope (write-then-read freshness propagation).
+
+### `PermissionEvaluator` — per-request check cache
+
+```python
+from rebac import current_evaluator, evaluator_scope, PermissionEvaluator
+
+with evaluator_scope() as evaluator:
+    # First call hits the backend; subsequent calls with the same
+    # (subject, action, resource, context) tuple come from the LRU cache.
+    evaluator.check(backend(), subject=u, action="read", resource=ObjectRef("blog/post", "1"))
+    evaluator.check(backend(), subject=u, action="read", resource=ObjectRef("blog/post", "1"))
+    # → 1 backend call total
+
+    # `evaluator.accessible(...)` caches list-of-ids the same way.
+```
+
+Bounded by `REBAC_EVALUATOR_CACHE_SIZE` (default `10_000`) using `OrderedDict`
+LRU eviction across BOTH check and accessible caches. Conditional results
+(`CONDITIONAL_PERMISSION(missing=[...])`) are NOT cached — the missing caveat
+params are part of the answer and the next call may supply them. Per-call
+explicit `consistency` / `at_zookie` also bypass the cache.
+
+`accessible_cached`, `enable_accessible_cache`, `disable_accessible_cache`
+(the v0.3 helpers) are kept as `DeprecationWarning`-emitting aliases through
+0.5 and removed in 0.6 alongside the denormalized storage path.
+
+### Zookie freshness — closes the write-then-read window
+
+Every backend write returns a `Zookie`; `write_relationships` /
+`delete_relationships` record it in the ambient `_current_zookie` ContextVar
+automatically. The default consistency for subsequent reads in the same
+scope auto-upgrades to `Consistency.AT_LEAST_AS_FRESH(zookie)`.
+
+```python
+from rebac import write_relationships, current_zookie, zookie_scope
+
+with zookie_scope():
+    write_relationships([...])     # → records Zookie
+    # Subsequent read in scope sees post-write state across both backends:
+    # - SpiceDBBackend: ConsistencyRequirement.at_least_as_fresh translates
+    #   to the protobuf union, closing the dispatcher-cache window.
+    # - LocalBackend: `written_at_xid <= cutoff` filter on every Relationship
+    #   read in the evaluation walk.
+    accessible(subject=u, action="read", resource_type="blog/post")
+```
+
+LocalBackend's witness is the existing `Relationship.written_at_xid` column;
+`Zookie.token = str(<xid>)`. Backends validate `Zookie.backend` matches their
+own `kind` and raise on mismatch — a SpiceDB token handed to LocalBackend
+would be interpreted as a numeric xid with garbage semantics.
+
+**Cross-request transport** for SPA / JWT consumers is opt-in via
+`REBAC_ZOOKIE_TRANSPORT`:
+
+| Value | Behavior | Use when |
+|---|---|---|
+| `"none"` (default) | Single-request scope only. | Server-side rendering, internal RPC. |
+| `"header"` | Request reads `X-Rebac-Zookie`; response writes it back. | SPA / mobile / JWT clients — both sides stateless. |
+| `"session"` | Persists into `request.session[_rebac_zookie]`. | Server-rendered sessions where `django.contrib.sessions` is already in play. System check `rebac.W006` fires if contrib.sessions is missing. |
+
+### GraphQL + WebSocket adapter (`rebac.graphql.strawberry`)
+
+Behind the `[strawberry]` extra: `pip install django-zed-rebac[strawberry]`.
+
+```python
+import strawberry
+from rebac.graphql.strawberry import RebacExtension, RebacChannelsConsumerMixin
+
+schema = strawberry.Schema(
+    query=Query,
+    mutation=Mutation,
+    subscription=Subscription,
+    extensions=[RebacExtension],
+)
+```
+
+`RebacExtension` opens fresh evaluator + Zookie scopes per GraphQL
+**operation** — and for subscriptions that means **per emission**, not
+per connection. A long-lived WebSocket subscription that started 2 hours
+ago doesn't serve cached pre-revocation grants on the next tick.
+
+The extension also mirrors `current_evaluator()` and `current_zookie()`
+onto `info.context.rebac_evaluator` / `.rebac_zookie` for resolvers that
+prefer explicit DI over the ambient ContextVar. Mirror is best-effort —
+read-only context types silently skip without crashing.
+
+For WS subscriptions, compose `RebacChannelsConsumerMixin` with whichever
+consumer base your stack uses:
+
+```python
+from channels.generic.websocket import AsyncJsonWebsocketConsumer
+from strawberry.channels import GraphQLWSConsumer
+from rebac.graphql.strawberry import RebacChannelsConsumerMixin
+
+class GraphQLConsumer(RebacChannelsConsumerMixin, GraphQLWSConsumer):
+    pass
+```
+
+Subscription invariants:
+- **Actor**: connection-scoped (resolved at handshake from `scope["user"]`).
+- **Evaluator**: per-emission. Revoked grants take effect at next tick.
+- **Zookie**: per-emission. Naturally aligns with the write-triggered nature
+  of subscriptions — the change that triggered the emission carries its
+  Zookie within the emission's scope.
+
 For non-request contexts (Celery, cron, management commands), use `with sudo(reason=...)` or set the actor explicitly via `.with_actor(actor)` / `.as_user(user)` / `.as_agent(agent, on_behalf_of=user)`.
 
 ---

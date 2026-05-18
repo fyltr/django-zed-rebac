@@ -3,6 +3,57 @@
 All notable changes to `django-zed-rebac` are tracked here. The project is in
 pre-1.0; breaking changes within a minor version are explicitly called out.
 
+## [Unreleased] — 0.4 (proposals 0001 + 0002)
+
+### Added — proposal 0002 (evaluator + Zookie freshness + Strawberry/Channels)
+
+- **`PermissionEvaluator`** — per-scope LRU cache for `check_access` /
+  `accessible` calls. Bounded by `REBAC_EVALUATOR_CACHE_SIZE`
+  (default `10_000`). Conditional results never cached; per-call
+  explicit `consistency` / `at_zookie` bypass cache. The evaluator
+  rides on `_current_evaluator` ContextVar — async-safe across
+  `asyncio.create_task` / Strawberry resolvers.
+- **`current_evaluator()` / `evaluator_scope()`** — public API in
+  `rebac.evaluator`. `ActorMiddleware` opens a scope per request;
+  `RebacExtension` opens one per GraphQL operation (per emission for
+  subscriptions).
+- **Zookie freshness ContextVar** — `current_zookie()`,
+  `record_zookie()`, `zookie_scope()` in `rebac.consistency`.
+  `write_relationships` / `delete_relationships` auto-record the
+  post-write Zookie; subsequent reads auto-upgrade to
+  `Consistency.AT_LEAST_AS_FRESH` via `effective_consistency()`.
+- **Backend ABC `at_zookie` parameter** — `check_access`,
+  `accessible`, `lookup_subjects` accept `at_zookie: Zookie | None`
+  for freshness-pinned reads. LocalBackend translates to
+  `written_at_xid <= cutoff` on every Relationship read in the
+  evaluation walk; SpiceDBBackend (stub) signature updated for the
+  forthcoming gRPC implementation.
+- **Cross-request Zookie transport** — `REBAC_ZOOKIE_TRANSPORT` setting:
+  `"none"` (default), `"header"` (uses `REBAC_ZOOKIE_HEADER_NAME` /
+  default `X-Rebac-Zookie`), `"session"` (uses
+  `REBAC_ZOOKIE_SESSION_KEY` / default `_rebac_zookie`).
+- **`rebac.graphql.strawberry` adapter** — behind `[strawberry]` extra.
+  `RebacExtension` (per-operation evaluator + Zookie scope; mirrors
+  state onto `info.context.rebac_evaluator` / `.rebac_zookie`) and
+  `RebacChannelsConsumerMixin` (actor resolution at WS handshake).
+  Subscription invariants: actor connection-scoped, evaluator + Zookie
+  per-emission, so revoked grants take effect on the next tick.
+- New system checks:
+  - `rebac.E007` — `REBAC_ZOOKIE_TRANSPORT` must be
+    `"none"` / `"header"` / `"session"`.
+  - `rebac.W006` — `"session"` transport but `django.contrib.sessions`
+    not in `INSTALLED_APPS`.
+
+### Deprecated
+
+- `rebac.actors.accessible_cached` — alias for the evaluator's
+  `accessible()`; emits `DeprecationWarning` (once per process).
+- `rebac.actors.enable_accessible_cache` /
+  `rebac.actors.disable_accessible_cache` — aliases for
+  `evaluator_scope()` enter/exit. Same single-shot
+  `DeprecationWarning` pattern. Removed in 0.6 alongside the
+  denormalized storage path.
+
 ## [Unreleased] — 0.4 (proposal 0001: registry storage)
 
 ### Added

@@ -34,6 +34,12 @@ from .actors import (
     to_subject_ref,
 )
 from .conf import app_settings
+from .consistency import (
+    current_zookie,
+    effective_consistency,
+    record_zookie,
+    zookie_scope,
+)
 from .errors import (
     CaveatUnsupportedError,
     MissingActorError,
@@ -43,6 +49,7 @@ from .errors import (
     RebacError,
     SchemaError,
 )
+from .evaluator import PermissionEvaluator, current_evaluator, evaluator_scope
 from .types import (
     CheckResult,
     Consistency,
@@ -142,6 +149,15 @@ __all__ = [
     "write_relationships",
     "delete_relationships",
     "emit_audit_event",
+    # evaluator (proposal 0002)
+    "PermissionEvaluator",
+    "current_evaluator",
+    "evaluator_scope",
+    # consistency (proposal 0002)
+    "current_zookie",
+    "record_zookie",
+    "zookie_scope",
+    "effective_consistency",
     # settings
     "app_settings",
 ]

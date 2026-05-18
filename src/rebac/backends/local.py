@@ -31,8 +31,11 @@ Caveats are tri-state:
 from __future__ import annotations
 
 import time
-from collections.abc import Iterable
+from collections.abc import Iterable, Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
 from threading import Lock
+from typing import Any
 from weakref import WeakSet
 
 from ..actors import is_anonymous_actor
@@ -64,11 +67,66 @@ from .base import Backend
 _backend_registry_lock = Lock()
 _db_loaded_backends: WeakSet[LocalBackend] = WeakSet()
 
+# Per-evaluation freshness cutoff. When non-None, every Relationship
+# queryset inside _has_direct_relation / _resources_via_relation /
+# _resources_for_expr is narrowed by ``written_at_xid__lte=cutoff`` so
+# `Consistency.AT_LEAST_AS_FRESH(zookie)` semantics hold across the
+# whole walk without threading the value through every internal call.
+# ContextVar (not instance state) because LocalBackend is a singleton
+# reused across requests / async tasks; each task gets its own slot.
+_freshness_xid: ContextVar[int | None] = ContextVar("rebac_local_freshness_xid", default=None)
+
+
+@contextmanager
+def _freshness_scope(xid: int | None) -> Iterator[None]:
+    """Bracket every internal read with ``written_at_xid <= xid`` when set."""
+    token = _freshness_xid.set(xid)
+    try:
+        yield
+    finally:
+        _freshness_xid.reset(token)
+
 
 class LocalBackend(Backend):
     """Recursive-CTE-style evaluator implemented as a bounded graph walk."""
 
     kind = "local"
+
+    @staticmethod
+    def _validate_zookie(at_zookie: Zookie | None) -> int | None:
+        """Validate the backend kind and return the freshness xid cutoff.
+
+        Returns ``None`` when no zookie was supplied. Raises ``ValueError``
+        when the zookie was emitted by a different backend (a SpiceDB
+        token handed here would be interpreted as a numeric xid with
+        garbage semantics; fail loudly).
+        """
+        if at_zookie is None:
+            return None
+        if at_zookie.backend != "local":
+            raise ValueError(
+                f"LocalBackend cannot consume a Zookie from backend "
+                f"{at_zookie.backend!r}. Drain or translate the token at "
+                f"the boundary where backends switched."
+            )
+        try:
+            return int(at_zookie.token)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(
+                f"LocalBackend Zookie token must be a numeric xid; got {at_zookie.token!r}"
+            ) from exc
+
+    def _apply_freshness(self, qs: Any) -> Any:
+        """Narrow a Relationship queryset by the ambient freshness cutoff.
+
+        No-op when no scope is open. Applied at every relationship-table
+        read in the evaluation walk so any path through the engine
+        honours the floor uniformly.
+        """
+        cutoff = _freshness_xid.get()
+        if cutoff is None:
+            return qs
+        return qs.filter(written_at_xid__lte=cutoff)
 
     def __init__(self) -> None:
         self._schema_lock = Lock()
@@ -177,6 +235,18 @@ class LocalBackend(Backend):
         resource: ObjectRef,
         context: dict | None = None,
         consistency: Consistency | None = None,
+        at_zookie: Zookie | None = None,
+    ) -> CheckResult:
+        cutoff = self._validate_zookie(at_zookie)
+        with _freshness_scope(cutoff):
+            return self._check_access(subject, action, resource, context)
+
+    def _check_access(
+        self,
+        subject: SubjectRef,
+        action: str,
+        resource: ObjectRef,
+        context: dict | None,
     ) -> CheckResult:
         # Empty resource_id → model-level check (any row of this type the subject
         # has the action on). Treat as "is the accessible() set non-empty?".
@@ -184,7 +254,7 @@ class LocalBackend(Backend):
             try:
                 next(
                     iter(
-                        self.accessible(
+                        self._accessible(
                             subject=subject,
                             action=action,
                             resource_type=resource.resource_type,
@@ -239,7 +309,25 @@ class LocalBackend(Backend):
         resource_type: str,
         context: dict | None = None,
         consistency: Consistency | None = None,
+        at_zookie: Zookie | None = None,
     ) -> Iterable[str]:
+        cutoff = self._validate_zookie(at_zookie)
+        with _freshness_scope(cutoff):
+            return self._accessible(
+                subject=subject,
+                action=action,
+                resource_type=resource_type,
+                context=context,
+            )
+
+    def _accessible(
+        self,
+        *,
+        subject: SubjectRef,
+        action: str,
+        resource_type: str,
+        context: dict | None = None,
+    ) -> list[str]:
         # accessible() is read-side conservative for caveats: rows whose caveat
         # evaluates to False OR is conditional (missing params) are excluded
         # silently. Callers wanting to learn about conditional rows should use
@@ -311,11 +399,13 @@ class LocalBackend(Backend):
         subject_type: str,
         context: dict | None = None,
         consistency: Consistency | None = None,
+        at_zookie: Zookie | None = None,
     ) -> Iterable[SubjectRef]:
         # Minimal forward lookup — direct relation rows only. Walking through
         # subject sets / arrows for reverse lookup is deferred to v0.2.
         from ..models import active_relationship_model
 
+        cutoff = self._validate_zookie(at_zookie)
         RelationshipModel = active_relationship_model()
 
         permission = self.schema().get_permission(resource.resource_type, action)
@@ -328,15 +418,19 @@ class LocalBackend(Backend):
         if not relation_names:
             return []
 
-        rows = RelationshipModel.objects.filter(
-            resource_type=resource.resource_type,
-            resource_id=resource.resource_id,
-            relation__in=relation_names,
-            subject_type=subject_type,
-        )
-        return [
-            SubjectRef.of(r.subject_type, r.subject_id, r.optional_subject_relation) for r in rows
-        ]
+        with _freshness_scope(cutoff):
+            rows = self._apply_freshness(
+                RelationshipModel.objects.filter(
+                    resource_type=resource.resource_type,
+                    resource_id=resource.resource_id,
+                    relation__in=relation_names,
+                    subject_type=subject_type,
+                )
+            )
+            return [
+                SubjectRef.of(r.subject_type, r.subject_id, r.optional_subject_relation)
+                for r in rows
+            ]
 
     def write_relationships(self, writes: Iterable[RelationshipTuple]) -> Zookie:
         from django.db import transaction
@@ -346,8 +440,12 @@ class LocalBackend(Backend):
         RelationshipModel = active_relationship_model()
 
         rows = list(writes)
+        max_xid = 0
         with transaction.atomic():
             for tup in rows:
+                xid = self._next_xid()
+                if xid > max_xid:
+                    max_xid = xid
                 RelationshipModel.objects.update_or_create(
                     resource_type=tup.resource.resource_type,
                     resource_id=tup.resource.resource_id,
@@ -359,10 +457,17 @@ class LocalBackend(Backend):
                     defaults={
                         "caveat_context": tup.caveat_context or None,
                         "expires_at": tup.expires_at,
-                        "written_at_xid": self._next_xid(),
+                        "written_at_xid": xid,
                     },
                 )
-        return self._zookie()
+        # Zookie token == the maximum xid actually written in the batch,
+        # so ``at_least_as_fresh(zookie)`` reads include every row this
+        # call produced and exclude every row written strictly later.
+        # An empty batch returns the most-recent watermark (or 0 on a
+        # fresh backend) — never advances the clock.
+        if max_xid == 0:
+            return self._zookie()
+        return Zookie(self.kind, str(max_xid))
 
     def delete_relationships(self, filter_: RelationshipFilter) -> Zookie:
         from ..models import active_relationship_model
@@ -448,10 +553,12 @@ class LocalBackend(Backend):
             via = _find_relation(definition, expr.via)
             if via is None:
                 return False
-            targets = RelationshipModel.objects.filter(
-                resource_type=definition.resource_type,
-                resource_id=resource_id,
-                relation=expr.via,
+            targets = self._apply_freshness(
+                RelationshipModel.objects.filter(
+                    resource_type=definition.resource_type,
+                    resource_id=resource_id,
+                    relation=expr.via,
+                )
             )
             saw_conditional = False
             for row in targets:
@@ -612,10 +719,12 @@ class LocalBackend(Backend):
 
         RelationshipModel = active_relationship_model()
 
-        rows = RelationshipModel.objects.filter(
-            resource_type=resource_type,
-            resource_id=resource_id,
-            relation=relation,
+        rows = self._apply_freshness(
+            RelationshipModel.objects.filter(
+                resource_type=resource_type,
+                resource_id=resource_id,
+                relation=relation,
+            )
         )
         saw_conditional = False
         # Direct subject match
@@ -759,11 +868,13 @@ class LocalBackend(Backend):
                 )
                 if not target_resource_ids:
                     continue
-                rows = RelationshipModel.objects.filter(
-                    resource_type=definition.resource_type,
-                    relation=expr.via,
-                    subject_type=target_type,
-                    subject_id__in=list(target_resource_ids),
+                rows = self._apply_freshness(
+                    RelationshipModel.objects.filter(
+                        resource_type=definition.resource_type,
+                        relation=expr.via,
+                        subject_type=target_type,
+                        subject_id__in=list(target_resource_ids),
+                    )
                 )
                 for r in _filter_active(rows):
                     # Hop-row caveat must evaluate True (silent on conditional).
@@ -854,12 +965,14 @@ class LocalBackend(Backend):
         sink: set[str] = set()
 
         # Direct rows
-        direct = RelationshipModel.objects.filter(
-            resource_type=resource_type,
-            relation=relation,
-            subject_type=subject.subject_type,
-            subject_id=subject.subject_id,
-            optional_subject_relation=subject.optional_relation,
+        direct = self._apply_freshness(
+            RelationshipModel.objects.filter(
+                resource_type=resource_type,
+                relation=relation,
+                subject_type=subject.subject_type,
+                subject_id=subject.subject_id,
+                optional_subject_relation=subject.optional_relation,
+            )
         )
         for r in _filter_active(direct):
             if self._evaluate_row_caveat(r, context, sink) is True:
@@ -867,11 +980,13 @@ class LocalBackend(Backend):
 
         # Wildcard rows
         if not subject.optional_relation:
-            wildcard = RelationshipModel.objects.filter(
-                resource_type=resource_type,
-                relation=relation,
-                subject_type=subject.subject_type,
-                subject_id="*",
+            wildcard = self._apply_freshness(
+                RelationshipModel.objects.filter(
+                    resource_type=resource_type,
+                    relation=relation,
+                    subject_type=subject.subject_type,
+                    subject_id="*",
+                )
             )
             for r in _filter_active(wildcard):
                 if self._evaluate_row_caveat(r, context, sink) is True:
@@ -879,9 +994,11 @@ class LocalBackend(Backend):
 
         # Subject-set rows: e.g. resources granted to `auth/group:X#member`
         # require the subject to actually be a member of group X.
-        subject_set_rows = RelationshipModel.objects.filter(
-            resource_type=resource_type, relation=relation
-        ).exclude(optional_subject_relation="")
+        subject_set_rows = self._apply_freshness(
+            RelationshipModel.objects.filter(
+                resource_type=resource_type, relation=relation
+            ).exclude(optional_subject_relation="")
+        )
         for row in subject_set_rows:
             if not _is_active(row):
                 continue

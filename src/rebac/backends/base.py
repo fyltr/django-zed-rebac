@@ -17,7 +17,15 @@ from ..types import (
 
 
 class Backend(ABC):
-    """Mirror of `authzed.api.v1` surface, snake_cased."""
+    """Mirror of `authzed.api.v1` surface, snake_cased.
+
+    The ``at_zookie`` parameter on read methods (added in 0.4 per
+    proposal 0002) carries the freshness floor for
+    ``Consistency.AT_LEAST_AS_FRESH`` / ``AT_EXACT_SNAPSHOT`` reads.
+    Backends MUST validate ``at_zookie.backend == self.kind`` and raise
+    a clear error on mismatch — a SpiceDB zookie handed to LocalBackend
+    is interpreted as a numeric xid and would silently corrupt results.
+    """
 
     kind: str = ""
 
@@ -30,6 +38,7 @@ class Backend(ABC):
         resource: ObjectRef,
         context: dict | None = None,
         consistency: Consistency | None = None,
+        at_zookie: Zookie | None = None,
     ) -> CheckResult:
         """Three-state. Combines model-level and record-level checks."""
 
@@ -41,6 +50,7 @@ class Backend(ABC):
         resource: ObjectRef,
         context: dict | None = None,
         consistency: Consistency | None = None,
+        at_zookie: Zookie | None = None,
     ) -> bool:
         """Boolean shorthand. CONDITIONAL collapses to False."""
         return self.check_access(
@@ -49,6 +59,7 @@ class Backend(ABC):
             resource=resource,
             context=context,
             consistency=consistency,
+            at_zookie=at_zookie,
         ).allowed
 
     @abstractmethod
@@ -60,6 +71,7 @@ class Backend(ABC):
         resource_type: str,
         context: dict | None = None,
         consistency: Consistency | None = None,
+        at_zookie: Zookie | None = None,
     ) -> Iterable[str]:
         """Set of resource_ids the subject has `action` on."""
 
@@ -72,6 +84,7 @@ class Backend(ABC):
         subject_type: str,
         context: dict | None = None,
         consistency: Consistency | None = None,
+        at_zookie: Zookie | None = None,
     ) -> Iterable[SubjectRef]:
         """Reverse: who has `action` on this resource?"""
 
