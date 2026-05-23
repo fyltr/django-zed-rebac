@@ -11,6 +11,8 @@ Covers:
 
 from __future__ import annotations
 
+from collections.abc import Callable
+
 import pytest
 from django.db import transaction
 
@@ -49,7 +51,7 @@ definition blog/post {
 @pytest.fixture(autouse=True)
 def _setup_backend(db):
     reset_backend()
-    backend().set_schema(parse_zed(SCHEMA_TEXT))  # type: ignore[attr-defined]
+    backend().set_schema(parse_zed(SCHEMA_TEXT))
     yield
     reset_backend()
 
@@ -267,3 +269,79 @@ def test_denial_audited_when_setting_enabled(settings):
     assert rows[0].actor_subject_type == "auth/user"
     assert rows[0].actor_subject_id == "bob"
     assert rows[0].reason.startswith("denied:")
+
+
+# ---------- aemit (async) ----------
+
+
+@pytest.mark.django_db(transaction=True)
+def test_aemit_immediate_writes_via_acreate():
+    """``aemit(defer_to_commit=False)`` awaits acreate on the loop."""
+    import asyncio
+
+    from rebac.audit import aemit
+
+    PermissionAuditEvent.objects.filter(reason="aemit.immediate").delete()
+
+    async def _run() -> None:
+        await aemit(
+            PermissionAuditEvent.KIND_SUDO_BYPASS,
+            actor=SubjectRef.of("auth/user", "alice"),
+            reason="aemit.immediate",
+            defer_to_commit=False,
+        )
+
+    asyncio.run(_run())
+    rows = list(PermissionAuditEvent.objects.filter(reason="aemit.immediate"))
+    assert len(rows) == 1
+    assert rows[0].actor_subject_id == "alice"
+    assert rows[0].kind == PermissionAuditEvent.KIND_SUDO_BYPASS
+
+
+@pytest.mark.django_db(transaction=True)
+def test_aemit_defer_to_commit_registers_on_commit_hook():
+    """``aemit(defer_to_commit=True)`` routes through ``transaction.on_commit``.
+
+    Patching ``transaction.on_commit`` is the only way to *prove* the
+    deferred path was taken — asserting the row exists wouldn't
+    distinguish ``defer_to_commit=True`` from ``defer_to_commit=False``
+    in autocommit mode (both produce a row eventually). Here we
+    confirm the registration call shape and that the registered
+    callback, when invoked, writes the expected row.
+    """
+    import asyncio
+    from unittest.mock import patch
+
+    from rebac.audit import aemit
+
+    PermissionAuditEvent.objects.filter(reason="aemit.deferred").delete()
+
+    captured: list[Callable[[], None]] = []
+
+    def _fake_on_commit(func, using=None, robust=False):
+        captured.append(func)
+
+    async def _run() -> None:
+        with patch("rebac.audit.transaction.on_commit", side_effect=_fake_on_commit):
+            await aemit(
+                PermissionAuditEvent.KIND_RELATIONSHIP_GRANT,
+                actor=SubjectRef.of("auth/user", "bob"),
+                reason="aemit.deferred",
+                defer_to_commit=True,
+            )
+
+    asyncio.run(_run())
+
+    # The deferred path called ``transaction.on_commit`` exactly once
+    # with a 0-arity sync callable; nothing landed in the DB while the
+    # patch was active.
+    assert len(captured) == 1
+    assert PermissionAuditEvent.objects.filter(reason="aemit.deferred").count() == 0
+
+    # Invoking the registered callback writes the expected row,
+    # proving the callback closure carries the correct kwargs.
+    captured[0]()
+    rows = list(PermissionAuditEvent.objects.filter(reason="aemit.deferred"))
+    assert len(rows) == 1
+    assert rows[0].actor_subject_id == "bob"
+    assert rows[0].kind == PermissionAuditEvent.KIND_RELATIONSHIP_GRANT

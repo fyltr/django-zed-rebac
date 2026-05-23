@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from collections.abc import Iterable
+from typing import Any
 
 from ..schema.ast import Schema
 from ..types import (
@@ -37,7 +38,7 @@ class Backend(ABC):
         subject: SubjectRef,
         action: str,
         resource: ObjectRef,
-        context: dict | None = None,
+        context: dict[str, Any] | None = None,
         consistency: Consistency | None = None,
         at_zookie: Zookie | None = None,
     ) -> CheckResult:
@@ -49,7 +50,7 @@ class Backend(ABC):
         subject: SubjectRef,
         action: str,
         resource: ObjectRef,
-        context: dict | None = None,
+        context: dict[str, Any] | None = None,
         consistency: Consistency | None = None,
         at_zookie: Zookie | None = None,
     ) -> bool:
@@ -70,7 +71,7 @@ class Backend(ABC):
         subject: SubjectRef,
         action: str,
         resource_type: str,
-        context: dict | None = None,
+        context: dict[str, Any] | None = None,
         consistency: Consistency | None = None,
         at_zookie: Zookie | None = None,
     ) -> Iterable[str]:
@@ -83,7 +84,7 @@ class Backend(ABC):
         resource: ObjectRef,
         action: str,
         subject_type: str,
-        context: dict | None = None,
+        context: dict[str, Any] | None = None,
         consistency: Consistency | None = None,
         at_zookie: Zookie | None = None,
     ) -> Iterable[SubjectRef]:

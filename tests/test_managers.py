@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Any
+
 from django.test import override_settings
 
 from rebac.errors import SudoNotAllowedError
@@ -7,7 +9,7 @@ from rebac.managers import RebacManager, RebacQuerySet
 from tests.testapp.models import Post
 
 
-class CustomPostQuerySet(RebacQuerySet):
+class CustomPostQuerySet(RebacQuerySet[Any]):
     def titled(self, title: str) -> CustomPostQuerySet:
         return self.filter(title=title)
 
@@ -26,7 +28,7 @@ def test_rebac_manager_from_queryset_copied_methods_use_custom_queryset() -> Non
     manager = RebacManager.from_queryset(CustomPostQuerySet)()
     manager.model = Post
 
-    queryset = manager.titled("Notes")  # type: ignore[attr-defined]
+    queryset = manager.titled("Notes")
 
     assert isinstance(queryset, CustomPostQuerySet)
     assert str(queryset.query)

@@ -158,7 +158,7 @@ def _build_ctx(
     backend: Backend,
     schema: Schema,
     subject: SubjectRef,
-    context: dict | None,
+    context: dict[str, object] | None,
     missing: set[str],
     relationships: Mapping[str, Sequence[SubjectRef]],
 ) -> WalkContext:

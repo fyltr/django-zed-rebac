@@ -41,7 +41,14 @@ class _FakeExecutionContext:
 
 
 class _MutableContext:
-    """A namespace context — supports attribute assignment."""
+    """A namespace context — supports attribute assignment.
+
+    The extension writes ``rebac_evaluator`` / ``rebac_zookie`` onto the
+    context; declare them so the assertions are type-visible.
+    """
+
+    rebac_evaluator: object
+    rebac_zookie: object
 
 
 def _make_extension(context: object | None = None) -> RebacExtension:
@@ -52,7 +59,7 @@ def _make_extension(context: object | None = None) -> RebacExtension:
     tests assign it manually rather than going through __init__.
     """
     ext = RebacExtension.__new__(RebacExtension)
-    ext.execution_context = _FakeExecutionContext(context)  # type: ignore[attr-defined]
+    ext.execution_context = _FakeExecutionContext(context)  # type: ignore[assignment]
     return ext
 
 
@@ -166,7 +173,7 @@ def test_consumer_mixin_resolves_actor_at_handshake(monkeypatch):
     from rebac.actors import current_actor
 
     class _Base:
-        scope: dict
+        scope: dict[str, object]
 
         async def connect(self) -> None:
             # Capture the actor that's ambient at this point.
@@ -176,7 +183,7 @@ def test_consumer_mixin_resolves_actor_at_handshake(monkeypatch):
             pass
 
     class _Consumer(RebacChannelsConsumerMixin, _Base):
-        def __init__(self, scope: dict) -> None:
+        def __init__(self, scope: dict[str, object]) -> None:
             self.scope = scope
 
     consumer = _Consumer({"user": AnonymousUser()})
@@ -192,7 +199,7 @@ def test_consumer_mixin_handles_missing_user_in_scope():
     import asyncio
 
     class _Base:
-        scope: dict
+        scope: dict[str, object]
 
         async def connect(self) -> None:
             pass

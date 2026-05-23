@@ -49,7 +49,7 @@ definition blog/post {
 @pytest.fixture(autouse=True)
 def _setup_backend(db):
     reset_backend()
-    backend().set_schema(parse_zed(SCHEMA_TEXT))  # type: ignore[attr-defined]
+    backend().set_schema(parse_zed(SCHEMA_TEXT))
     yield
     reset_backend()
 
@@ -110,7 +110,7 @@ def test_pickle_strips_sudo_flag(alice, post):
 
     instance = Post.objects.as_user(alice).get(pk=post.pk)
     # Simulate code that flipped sudo on the instance for some reason.
-    instance._rebac_sudo_reason = "elevated.for.inline.fix"  # type: ignore[attr-defined]
+    instance._rebac_sudo_reason = "elevated.for.inline.fix"
 
     restored = pickle.loads(pickle.dumps(instance))
 

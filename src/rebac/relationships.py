@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
+from typing import Any
+
+from django.db.models import QuerySet
 
 from .types import RelationshipFilter, RelationshipTuple, Zookie
 
@@ -27,9 +30,9 @@ def _format_target(tup: RelationshipTuple) -> str:
 
 def write_relationships(writes: Iterable[RelationshipTuple]) -> Zookie:
     """Atomically commit relationship rows. Returns a consistency token."""
-    from . import backend
     from .actors import current_actor
     from .audit import emit as emit_audit
+    from .backends import backend
     from .consistency import record_zookie
     from .models import PermissionAuditEvent
 
@@ -57,9 +60,9 @@ def write_relationships(writes: Iterable[RelationshipTuple]) -> Zookie:
 
 def delete_relationships(filter_: RelationshipFilter) -> Zookie:
     """Atomically delete matching relationship rows."""
-    from . import backend
     from .actors import current_actor
     from .audit import emit as emit_audit
+    from .backends import backend
     from .consistency import record_zookie
     from .models import PermissionAuditEvent, active_relationship_model
 
@@ -72,7 +75,11 @@ def delete_relationships(filter_: RelationshipFilter) -> Zookie:
     # accessors expose the same names on instances, but for ``.values()``
     # in registry mode we have to project through the FK rows explicitly.
     RelationshipModel = active_relationship_model()
-    qs = RelationshipModel.objects.all()
+    # ``active_relationship_model`` returns a union of the two storage
+    # models; the FK-side lookups below only apply in registry mode
+    # (guarded by ``is_registry``). Type as ``QuerySet[Any]`` so the
+    # runtime-dispatched field names don't trip static field validation.
+    qs: QuerySet[Any] = RelationshipModel.objects.all()
     if filter_.resource_type:
         qs = qs.filter(resource_type=filter_.resource_type)
     if filter_.resource_id:
@@ -158,9 +165,9 @@ def delete_relationship(tuple_: RelationshipTuple) -> Zookie:
     that path once the backend ABC accepts operation-shaped updates. See
     ``docs/ARCHITECTURE.md``.
     """
-    from . import backend
     from .actors import current_actor
     from .audit import emit as emit_audit
+    from .backends import backend
     from .consistency import record_zookie
     from .models import PermissionAuditEvent, active_relationship_model
 

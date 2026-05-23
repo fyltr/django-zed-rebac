@@ -10,15 +10,16 @@ ARCHITECTURE.md § Three actor-resolution paths.
 
 from __future__ import annotations
 
-import warnings
-from collections.abc import Callable, Iterator
-from contextlib import contextmanager
+import builtins
+from collections.abc import AsyncIterator, Callable, Iterator
+from contextlib import asynccontextmanager, contextmanager
 from contextvars import ContextVar
 from importlib import import_module
-from typing import TYPE_CHECKING, Any, Protocol
+from typing import Any
 
 from django.contrib.auth import get_user_model
 
+from ._id import subject_id_attr
 from .conf import app_settings
 from .errors import (
     NoActorResolvedError,
@@ -27,106 +28,10 @@ from .errors import (
 )
 from .types import ObjectRef, SubjectRef
 
-if TYPE_CHECKING:
-    from .backends.base import Backend
-    from .types import Consistency
-
 # ---------- ContextVar ----------
 
 _current_actor: ContextVar[SubjectRef | None] = ContextVar("rebac_current_actor", default=None)
 _sudo_state: ContextVar[dict[str, Any] | None] = ContextVar("rebac_sudo", default=None)
-
-
-# ---------- Legacy cache helpers (deprecated in 0.4, removed in 0.6) ----------
-#
-# Proposal 0002 unified per-request caching under
-# :class:`rebac.evaluator.PermissionEvaluator`. The three helpers below —
-# ``accessible_cached``, ``enable_accessible_cache``,
-# ``disable_accessible_cache`` — keep their public signatures so existing
-# middleware / custom request hooks keep working, but each delegates to
-# the evaluator and emits a single-shot ``DeprecationWarning`` so
-# downstream callers see the warning at most once per process.
-#
-# Removal in 0.6 alongside the denormalized storage path (proposal 0001).
-
-_LEGACY_WARNED: set[str] = set()
-
-
-def _warn_legacy_once(name: str, message: str) -> None:
-    """Emit a DeprecationWarning at most once per process per call site."""
-    if name in _LEGACY_WARNED:
-        return
-    _LEGACY_WARNED.add(name)
-    warnings.warn(message, DeprecationWarning, stacklevel=3)
-
-
-def accessible_cached(
-    backend: Backend,
-    *,
-    subject: SubjectRef,
-    action: str,
-    resource_type: str,
-    context: dict | None = None,
-    consistency: Consistency | None = None,
-) -> tuple[str, ...]:
-    """Deprecated alias for ``current_evaluator().accessible(...)``.
-
-    Kept for 0.4 backward compat; removed in 0.6. New code should call
-    the evaluator directly (or just call ``backend.accessible(...)`` —
-    the evaluator is consulted automatically by the middleware-bracketed
-    request path).
-    """
-    _warn_legacy_once(
-        "accessible_cached",
-        "rebac.actors.accessible_cached is deprecated; use "
-        "rebac.evaluator.current_evaluator().accessible(...) instead. "
-        "Will be removed in v0.6.",
-    )
-    from .evaluator import PermissionEvaluator, current_evaluator
-
-    evaluator = current_evaluator() or PermissionEvaluator()
-    return evaluator.accessible(
-        backend,
-        subject=subject,
-        action=action,
-        resource_type=resource_type,
-        context=context,
-        consistency=consistency,
-    )
-
-
-def enable_accessible_cache() -> Any:
-    """Deprecated alias for opening a :func:`rebac.evaluator.evaluator_scope`.
-
-    Returns an opaque token compatible with the historic
-    ``disable_accessible_cache`` teardown. Existing middleware that
-    brackets a request with these two calls keeps working; new code
-    should use ``with evaluator_scope(): ...`` instead.
-    """
-    _warn_legacy_once(
-        "enable_accessible_cache",
-        "rebac.actors.enable_accessible_cache is deprecated; use "
-        "`with rebac.evaluator.evaluator_scope(): ...` instead. "
-        "Will be removed in v0.6.",
-    )
-    from .evaluator import PermissionEvaluator, _current_evaluator
-
-    return _current_evaluator.set(
-        PermissionEvaluator(max_size=app_settings.REBAC_EVALUATOR_CACHE_SIZE)
-    )
-
-
-def disable_accessible_cache(token: Any) -> None:
-    """Deprecated alias for the corresponding ``evaluator_scope`` teardown."""
-    _warn_legacy_once(
-        "disable_accessible_cache",
-        "rebac.actors.disable_accessible_cache is deprecated; use "
-        "`with rebac.evaluator.evaluator_scope(): ...` instead. "
-        "Will be removed in v0.6.",
-    )
-    from .evaluator import _current_evaluator
-
-    _current_evaluator.reset(token)
 
 
 def current_actor() -> SubjectRef | None:
@@ -209,14 +114,7 @@ def current_sudo_reason() -> str | None:
 # ---------- Subject conversion ----------
 
 
-class _RebacSubjectMarker(Protocol):
-    """Anything decorated with @rebac_subject exposes _rebac_type and _rebac_id_attr."""
-
-    _rebac_type: str
-    _rebac_id_attr: str
-
-
-ActorLike = SubjectRef | _RebacSubjectMarker | Any
+ActorLike = SubjectRef | Any
 """Anything resolvable to a `SubjectRef`.
 
 Concretely accepts:
@@ -238,11 +136,11 @@ def rebac_subject(*, type: str, id_attr: str = "pk") -> Callable[[type], type]:
         @rebac_subject(type="auth/apikey", id_attr="public_id")
         class ApiKey: ...
     """
+    rebac_type = type
+    rebac_id_attr = id_attr
 
-    def _decorator(cls: type) -> type:
-        _subject_registry[cls] = (type, id_attr)
-        cls._rebac_type = type  # type: ignore[attr-defined]
-        cls._rebac_id_attr = id_attr  # type: ignore[attr-defined]
+    def _decorator(cls: builtins.type) -> builtins.type:
+        _subject_registry[cls] = (rebac_type, rebac_id_attr)
         return cls
 
     return _decorator
@@ -256,6 +154,12 @@ def to_subject_ref(actor: ActorLike) -> SubjectRef:
     raw ``None`` is a framework error (the resolver chain failed) and still
     raises.
     """
+    # Imported inside the function, not at module top: ``actors`` is
+    # imported during ``INSTALLED_APPS`` boot (via ``rebac/__init__``),
+    # and ``django.contrib.auth.models`` cannot be imported until the
+    # app registry is ready (AppRegistryNotReady otherwise).
+    from django.contrib.auth.models import AnonymousUser, Group
+
     if actor is None:
         raise NoActorResolvedError("Cannot resolve None to a SubjectRef")
     if isinstance(actor, SubjectRef):
@@ -265,14 +169,8 @@ def to_subject_ref(actor: ActorLike) -> SubjectRef:
     # so it bypasses the isinstance(user_model) check below. Handle it
     # explicitly first — anonymous reads are a first-class authorization
     # path, not an error.
-    try:
-        from django.contrib.auth.models import AnonymousUser
-    except ImportError:  # pragma: no cover
-        AnonymousUser = None  # type: ignore[assignment]
-    if AnonymousUser is not None and isinstance(actor, AnonymousUser):
+    if isinstance(actor, AnonymousUser):
         return anonymous_actor()
-
-    from ._id import subject_id_attr
 
     user_model = get_user_model()
     if isinstance(actor, user_model):
@@ -292,12 +190,7 @@ def to_subject_ref(actor: ActorLike) -> SubjectRef:
         attr = subject_id_attr(user_model)
         return SubjectRef.of(app_settings.REBAC_USER_TYPE, str(getattr(actor, attr)))
 
-    # Group?
-    try:
-        from django.contrib.auth.models import Group
-    except ImportError:  # pragma: no cover
-        Group = None  # type: ignore[assignment]
-    if Group is not None and isinstance(actor, Group):
+    if isinstance(actor, Group):
         attr = subject_id_attr(Group)
         return SubjectRef.of(
             app_settings.REBAC_GROUP_TYPE,
@@ -358,19 +251,30 @@ def actor_context(actor: ActorLike) -> Iterator[None]:
         _current_actor.reset(token)
 
 
-@contextmanager
-def _sudo_state_context(*, reason: str | None = None) -> Iterator[None]:
-    """Install the ambient bypass state and emit the mandatory audit row."""
+def _install_sudo_state(reason: str | None) -> tuple[Any, dict[str, Any], SubjectRef | None]:
+    """Reason-check + install the sudo ContextVar slot.
+
+    Shared between :func:`_sudo_state_context` and
+    :func:`_asudo_state_context`. Returns the reset token, the state
+    dict (used by the caller to pass ``reason`` into the audit emit),
+    and the ambient actor captured at sudo entry — that's the subject
+    the bypass is being applied "as". For v1 origin == actor (no
+    impersonation chain plumbed yet); see audit.emit for the
+    column-level TODO.
+    """
     if app_settings.REBAC_REQUIRE_SUDO_REASON and not reason:
         raise SudoReasonRequiredError(
             "sudo() requires a `reason=...` argument when REBAC_REQUIRE_SUDO_REASON is True"
         )
     state = {"reason": reason or ""}
     token = _sudo_state.set(state)
-    # Capture the ambient actor at sudo entry — that's the subject the bypass
-    # is being applied "as". For v1 origin == actor (no impersonation chain
-    # plumbed yet); see audit.emit for the column-level TODO.
-    bypass_actor = _current_actor.get()
+    return token, state, _current_actor.get()
+
+
+@contextmanager
+def _sudo_state_context(*, reason: str | None = None) -> Iterator[None]:
+    """Install the ambient bypass state and emit the mandatory audit row."""
+    token, state, bypass_actor = _install_sudo_state(reason)
     try:
         from .audit import emit as _emit_audit
         from .models import PermissionAuditEvent
@@ -395,10 +299,53 @@ def sudo(*, reason: str | None = None) -> Iterator[None]:
     """Bypass REBAC checks for an explicitly enabled elevated request path.
 
     `reason` is mandatory unless `REBAC_REQUIRE_SUDO_REASON = False`.
+
+    Async callers should prefer :func:`asudo`, which awaits the audit
+    write on the event loop rather than hopping to a worker thread.
     """
     if not app_settings.REBAC_ALLOW_SUDO:
         raise SudoNotAllowedError("sudo() denied: REBAC_ALLOW_SUDO is False")
     with _sudo_state_context(reason=reason):
+        yield
+
+
+@asynccontextmanager
+async def _asudo_state_context(*, reason: str | None = None) -> AsyncIterator[None]:
+    """Async mirror of :func:`_sudo_state_context`.
+
+    Sets the same ContextVar slot and emits the same audit row, but
+    awaits :func:`rebac.audit.aemit` so the INSERT runs on the loop
+    instead of through the sync ``Model.objects.create`` /
+    worker-thread fallback in :func:`_sudo_state_context`.
+    """
+    token, state, bypass_actor = _install_sudo_state(reason)
+    try:
+        from .audit import aemit as _aemit_audit
+        from .models import PermissionAuditEvent
+
+        await _aemit_audit(
+            PermissionAuditEvent.KIND_SUDO_BYPASS,
+            actor=bypass_actor,
+            origin=bypass_actor,
+            reason=state["reason"],
+            defer_to_commit=False,
+        )
+        yield
+    finally:
+        _sudo_state.reset(token)
+
+
+@asynccontextmanager
+async def asudo(*, reason: str | None = None) -> AsyncIterator[None]:
+    """Async :func:`sudo`. Use in ``async def`` views / middleware / tasks.
+
+    Same semantics as :func:`sudo` — installs the bypass state and
+    emits a ``KIND_SUDO_BYPASS`` audit row — but awaits the audit
+    write so it never crosses the sync/async boundary.
+    """
+    if not app_settings.REBAC_ALLOW_SUDO:
+        raise SudoNotAllowedError("sudo() denied: REBAC_ALLOW_SUDO is False")
+    async with _asudo_state_context(reason=reason):
         yield
 
 
@@ -411,6 +358,13 @@ def system_context(*, reason: str | None = None) -> Iterator[None]:
     request-path `sudo()`.
     """
     with _sudo_state_context(reason=reason):
+        yield
+
+
+@asynccontextmanager
+async def asystem_context(*, reason: str | None = None) -> AsyncIterator[None]:
+    """Async :func:`system_context`. Same audit guarantees, on the loop."""
+    async with _asudo_state_context(reason=reason):
         yield
 
 
@@ -433,10 +387,11 @@ def default_resolver(request: Any) -> SubjectRef | None:
     - Authenticated user that fails ``to_subject_ref`` (e.g. an unregistered
       subject class) → the anonymous SubjectRef, as a fail-safe.
 
-    The return type stays ``SubjectRef | None`` for backwards compatibility
-    with custom resolvers that explicitly return ``None`` to signal
-    "no resolution attempted"; the default resolver itself never returns
-    ``None`` in v0.3+.
+    The return type is ``SubjectRef | None`` so a custom resolver may
+    return ``None`` to signal "no resolution attempted" — distinct from
+    "anonymous resolved". The default resolver itself never returns
+    ``None``; missing / unauthenticated users collapse to the anonymous
+    SubjectRef.
     """
     user = getattr(request, "user", None)
     if user is None or not getattr(user, "is_authenticated", False):
@@ -452,7 +407,8 @@ def get_actor_resolver() -> Callable[[Any], SubjectRef | None]:
     path = app_settings.REBAC_ACTOR_RESOLVER
     module_path, _, attr = path.rpartition(".")
     module = import_module(module_path)
-    return getattr(module, attr)
+    resolver: Callable[[Any], SubjectRef | None] = getattr(module, attr)
+    return resolver
 
 
 # ---------- Composing custom resolvers ----------

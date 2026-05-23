@@ -3,6 +3,87 @@
 All notable changes to `django-zed-rebac` are tracked here. The project is in
 pre-1.0; breaking changes within a minor version are explicitly called out.
 
+## [0.5.0] — 2026-05-23
+
+### Changed — Django 6.0+ only (BREAKING)
+
+- Minimum supported Django is now **6.0** (was 4.2). The `4.2` and
+  `5.2` trove classifiers are dropped and `dependencies` pins
+  `django>=6.0`. This lets the engine rely unconditionally on the
+  async session API (`SessionBase.aget` / `aset`), `transaction.aatomic`,
+  and the 6.0 async stack without runtime feature detection.
+
+### Removed — pre-1.0 deprecation shims
+
+- Deleted `rebac.actors.accessible_cached`,
+  `enable_accessible_cache`, and `disable_accessible_cache`. These were
+  0.4-era aliases kept behind a `DeprecationWarning`; per CLAUDE.md's
+  "no backwards-compat shims during 0.x" rule they're removed outright.
+  Use `rebac.evaluator.current_evaluator()` / `evaluator_scope()`
+  directly.
+
+### Internal — strict typing
+
+- The package now type-checks clean under `mypy --strict` with
+  `django-stubs` (added as a dev dependency and wired through the mypy
+  plugin); both `src/` and `tests/` are covered. `RebacQuerySet` /
+  `RebacManager` are generic over the model so the actor verbs preserve
+  the concrete row type through chaining. No runtime behaviour change.
+
+### Added — dual-mode (sync + async) `ActorMiddleware`
+
+- `rebac.middleware.ActorMiddleware` now advertises both
+  `sync_capable = True` and `async_capable = True`. At install time it
+  detects whether Django passed a coroutine `get_response` and (via
+  `asgiref.sync.markcoroutinefunction`) marks itself as awaitable, so
+  Django routes through the new `__acall__` coroutine instead of
+  wrapping the sync `__call__` in `async_to_sync`. In a pure-async
+  stack this collapses the sync↔async thread sandwich that previously
+  produced the doubled "During handling of the above exception, another
+  exception occurred" traceback on client-disconnect `CancelledError`.
+
+  The async path mirrors the sync path exactly — same `evaluator_scope`,
+  `zookie_scope`, and `sudo(reason="superuser-bypass")` brackets (all
+  three are ContextVar-only, safe inside `async def`). Two refinements
+  are async-only:
+
+  - Zookie **session transport** uses `request.session.aget` / `aset`
+    so the session load never forces a synchronous DB call when running
+    under ASGI.
+  - The configured `REBAC_ACTOR_RESOLVER` may now be declared
+    `async def`; the async path awaits it. The sync path is unchanged
+    and continues to call the resolver synchronously.
+
+  No setting changes, no migration. Sync-only deployments see no
+  behavioural difference.
+
+### Added — `asudo` / `asystem_context` / `aemit_audit_event`
+
+- `rebac.asudo(reason=...)` and `rebac.asystem_context(reason=...)` —
+  ``@asynccontextmanager`` siblings of ``sudo`` / ``system_context``.
+  Same audit-row guarantee, same ContextVar bookkeeping, but the
+  ``KIND_SUDO_BYPASS`` row is written through
+  ``PermissionAuditEvent.objects.acreate`` so the INSERT runs on the
+  event loop instead of via the sync ORM. Async views, async tasks,
+  and the dual-mode `ActorMiddleware` should reach for these in
+  preference to the sync helpers.
+- `rebac.aemit_audit_event(...)` — async variant of
+  `emit_audit_event`. ``defer_to_commit=False`` awaits ``acreate``
+  directly; ``defer_to_commit=True`` registers the on-commit callback
+  via ``asgiref.sync.sync_to_async(transaction.on_commit,
+  thread_sensitive=True)`` so callers using ``transaction.aatomic()``
+  see the same connection that holds their atomic block — the
+  on-commit hook lands in the right transaction's queue, not on a
+  fresh worker thread with its own (uncommitted) connection. Pure
+  autocommit callers see the equivalent immediate-write behaviour
+  the sync :func:`emit` already offers.
+- ``ActorMiddleware.__acall__`` now opens the superuser bypass via
+  ``asudo`` instead of the sync ``sudo`` → worker-thread audit hop.
+  The worker-thread fallback in ``rebac.audit._write_now`` stays as a
+  belt-and-braces safety net for any sync ``sudo()`` reachable from
+  an event loop, but the supported path for new async code is
+  ``asudo`` / ``aemit_audit_event``.
+
 ## [0.4.0] — 2026-05-22
 
 ### Added — preflight against not-yet-persisted resources

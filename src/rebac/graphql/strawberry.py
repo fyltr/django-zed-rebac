@@ -43,13 +43,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-try:
-    from strawberry.extensions import SchemaExtension
-except ModuleNotFoundError as exc:  # pragma: no cover — extras gate
-    raise ModuleNotFoundError(
-        "rebac.graphql.strawberry requires the 'strawberry-graphql' "
-        "package. Install with: pip install django-zed-rebac[strawberry]"
-    ) from exc
+from strawberry.extensions import SchemaExtension
 
 from ..actors import _current_actor
 from ..consistency import current_zookie, zookie_scope

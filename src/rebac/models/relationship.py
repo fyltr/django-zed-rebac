@@ -83,17 +83,20 @@ class Relationship(models.Model):
 
 
 def _translate_read_kwargs(kwargs: dict[str, Any]) -> dict[str, Any]:
-    """Rewrite legacy string lookups into FK-side lookups for the registry model.
+    """Rewrite denormalized-style string lookups into FK-side lookups.
 
-    Examples::
+    The registry model stores ``(type, id)`` pairs in ``RebacResource`` and
+    references them via ``resource_fk`` / ``subject_fk``. Engine code is
+    written against the denormalized shape (where the strings are inline
+    columns), so we translate at the manager boundary::
 
         resource_type="x" / resource_id="y" → resource_fk__resource_type / __resource_id
         subject_type__in=[...]              → subject_fk__resource_type__in=[...]
 
-    Only the legacy field names ``resource_type`` / ``resource_id`` /
-    ``subject_type`` / ``subject_id`` are rewritten; all other lookup
-    kwargs pass through unchanged so the manager remains a drop-in
-    replacement for the denormalized one.
+    Only the four denormalized field names ``resource_type`` /
+    ``resource_id`` / ``subject_type`` / ``subject_id`` are rewritten; all
+    other lookup kwargs pass through unchanged so the manager is a
+    drop-in for the denormalized one.
     """
     out: dict[str, Any] = {}
     for key, value in kwargs.items():
@@ -112,7 +115,7 @@ def _translate_read_kwargs(kwargs: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
-class RelationshipRegistryQuerySet(models.QuerySet):
+class RelationshipRegistryQuerySet(models.QuerySet["RelationshipRegistry"]):
     """Translating QuerySet for :class:`RelationshipRegistry`.
 
     Rewriting the kwargs at the QuerySet level (rather than only on the
@@ -122,10 +125,10 @@ class RelationshipRegistryQuerySet(models.QuerySet):
     returns this class so the rewrite is in scope for the whole chain.
     """
 
-    def filter(self, *args: Any, **kwargs: Any) -> RelationshipRegistryQuerySet:  # type: ignore[override]
+    def filter(self, *args: Any, **kwargs: Any) -> RelationshipRegistryQuerySet:
         return super().filter(*args, **_translate_read_kwargs(kwargs))
 
-    def exclude(self, *args: Any, **kwargs: Any) -> RelationshipRegistryQuerySet:  # type: ignore[override]
+    def exclude(self, *args: Any, **kwargs: Any) -> RelationshipRegistryQuerySet:
         return super().exclude(*args, **_translate_read_kwargs(kwargs))
 
     def get(self, *args: Any, **kwargs: Any) -> Any:
@@ -182,10 +185,12 @@ class RelationshipRegistryManager(models.Manager.from_queryset(RelationshipRegis
         # Eager-join the FK rows. Engine code reads ``row.resource_type``
         # / ``row.subject_id`` per-row, so without select_related the
         # per-row property accessors would issue N queries.
-        return super().get_queryset().select_related("resource_fk", "subject_fk")  # type: ignore[return-value]
+        qs: RelationshipRegistryQuerySet = super().get_queryset()
+        return qs.select_related("resource_fk", "subject_fk")
 
     def create(self, **kwargs: Any) -> RelationshipRegistry:
-        return super().create(**self._translate_write_kwargs(kwargs))
+        obj: RelationshipRegistry = super().create(**self._translate_write_kwargs(kwargs))
+        return obj
 
     def get_or_create(
         self,
@@ -193,7 +198,10 @@ class RelationshipRegistryManager(models.Manager.from_queryset(RelationshipRegis
         **kwargs: Any,
     ) -> tuple[RelationshipRegistry, bool]:
         kwargs = self._translate_write_kwargs(kwargs)
-        return super().get_or_create(defaults=defaults, **kwargs)
+        result: tuple[RelationshipRegistry, bool] = super().get_or_create(
+            defaults=defaults, **kwargs
+        )
+        return result
 
     def update_or_create(
         self,
@@ -202,9 +210,10 @@ class RelationshipRegistryManager(models.Manager.from_queryset(RelationshipRegis
         **kwargs: Any,
     ) -> tuple[RelationshipRegistry, bool]:
         kwargs = self._translate_write_kwargs(kwargs)
-        return super().update_or_create(
+        result: tuple[RelationshipRegistry, bool] = super().update_or_create(
             defaults=defaults, create_defaults=create_defaults, **kwargs
         )
+        return result
 
 
 class RelationshipRegistry(models.Model):
@@ -212,9 +221,9 @@ class RelationshipRegistry(models.Model):
 
     Same wire-shape as :class:`Relationship` but ``resource_*`` and
     ``subject_*`` collapse into two integer FKs pointing at
-    :class:`rebac.models.RebacResource`. Reads of the legacy string columns
-    are proxied through ``resource_fk`` / ``subject_fk`` via the property
-    accessors below.
+    :class:`rebac.models.RebacResource`. Reads of the denormalized string
+    columns are proxied through ``resource_fk`` / ``subject_fk`` via the
+    property accessors below.
 
     Writes via the public manager (``RelationshipRegistry.objects.create(
     resource_type='...', resource_id='...', ...)``) upsert the
@@ -305,7 +314,7 @@ class RelationshipRegistry(models.Model):
         )
 
 
-def active_relationship_model() -> type[models.Model]:
+def active_relationship_model() -> type[Relationship] | type[RelationshipRegistry]:
     """Return the relationship model selected by ``REBAC_LOCAL_BACKEND_STORAGE``.
 
     Engine code (``LocalBackend``, ``rebac.relationships``,
@@ -314,6 +323,12 @@ def active_relationship_model() -> type[models.Model]:
     a code change. External consumers that import ``Relationship`` or
     ``RelationshipRegistry`` by name keep working unchanged in their
     respective modes.
+
+    The return type is a union of the two concrete model classes (not
+    ``type[Model]``) so call sites can reach ``.objects`` without losing
+    the manager type — both classes expose the same Django-default
+    ``Manager`` plus, in the registry case, the extra translation
+    helpers defined on ``RelationshipRegistryManager``.
     """
     if app_settings.REBAC_LOCAL_BACKEND_STORAGE == "registry":
         return RelationshipRegistry

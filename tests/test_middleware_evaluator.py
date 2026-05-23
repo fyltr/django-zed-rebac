@@ -93,7 +93,7 @@ def test_header_transport_rehydrates_initial_zookie():
 
 @pytest.mark.django_db
 def test_header_transport_persists_response_header():
-    class _Resp(dict):
+    class _Resp(dict[str, object]):
         pass
 
     def get_response(request):
@@ -128,7 +128,7 @@ def test_header_transport_malformed_value_is_safe():
 def test_header_transport_read_only_request_skips_response_header():
     """A request that records no Zookie produces no response header."""
 
-    class _Resp(dict):
+    class _Resp(dict[str, object]):
         pass
 
     def get_response(request):
@@ -167,7 +167,7 @@ def test_none_transport_ignores_header():
 def test_session_transport_rehydrates_and_persists():
     seen: dict[str, object] = {}
 
-    class _SessionDict(dict):
+    class _SessionDict(dict[str, object]):
         modified = False
 
     def get_response(request):

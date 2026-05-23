@@ -38,6 +38,8 @@ from threading import Lock
 from typing import Any
 from weakref import WeakSet
 
+from django.db.models import QuerySet
+
 from ..conf import app_settings
 from ..errors import PermissionDepthExceeded
 from ..schema.ast import (
@@ -246,7 +248,7 @@ class LocalBackend(Backend):
         subject: SubjectRef,
         action: str,
         resource: ObjectRef,
-        context: dict | None = None,
+        context: dict[str, Any] | None = None,
         consistency: Consistency | None = None,
         at_zookie: Zookie | None = None,
     ) -> CheckResult:
@@ -259,7 +261,7 @@ class LocalBackend(Backend):
         subject: SubjectRef,
         action: str,
         resource: ObjectRef,
-        context: dict | None,
+        context: dict[str, Any] | None,
     ) -> CheckResult:
         # Empty resource_id → model-level check (any row of this type the subject
         # has the action on). Treat as "is the accessible() set non-empty?".
@@ -320,7 +322,7 @@ class LocalBackend(Backend):
         subject: SubjectRef,
         action: str,
         resource_type: str,
-        context: dict | None = None,
+        context: dict[str, Any] | None = None,
         consistency: Consistency | None = None,
         at_zookie: Zookie | None = None,
     ) -> Iterable[str]:
@@ -339,7 +341,7 @@ class LocalBackend(Backend):
         subject: SubjectRef,
         action: str,
         resource_type: str,
-        context: dict | None = None,
+        context: dict[str, Any] | None = None,
     ) -> list[str]:
         # accessible() is read-side conservative for caveats: rows whose caveat
         # evaluates to False OR is conditional (missing params) are excluded
@@ -380,7 +382,7 @@ class LocalBackend(Backend):
         subject: SubjectRef,
         action: str,
         resource_type: str,
-        context: dict | None = None,
+        context: dict[str, Any] | None = None,
     ) -> bool:
         """Return True when the schema grants every row of a type.
 
@@ -410,7 +412,7 @@ class LocalBackend(Backend):
         resource: ObjectRef,
         action: str,
         subject_type: str,
-        context: dict | None = None,
+        context: dict[str, Any] | None = None,
         consistency: Consistency | None = None,
         at_zookie: Zookie | None = None,
     ) -> Iterable[SubjectRef]:
@@ -542,7 +544,7 @@ class LocalBackend(Backend):
         resource_id: str,
         subject: SubjectRef,
         depth: int,
-        context: dict | None = None,
+        context: dict[str, Any] | None = None,
         missing: set[str] | None = None,
     ) -> bool | None:
         """Tri-state permission evaluation.
@@ -700,7 +702,7 @@ class LocalBackend(Backend):
         resource_id: str,
         subject: SubjectRef,
         depth: int,
-        context: dict | None = None,
+        context: dict[str, Any] | None = None,
         missing: set[str] | None = None,
     ) -> bool | None:
         permission = next((p for p in definition.permissions if p.name == permission_name), None)
@@ -726,7 +728,7 @@ class LocalBackend(Backend):
         relation: str,
         subject: SubjectRef,
         depth: int,
-        context: dict | None = None,
+        context: dict[str, Any] | None = None,
         missing: set[str] | None = None,
     ) -> bool | None:
         """Tri-state direct-relation lookup.
@@ -813,7 +815,7 @@ class LocalBackend(Backend):
     def _evaluate_row_caveat(
         self,
         row: object,
-        context: dict | None,
+        context: dict[str, Any] | None,
         missing: set[str],
     ) -> bool | None:
         """Evaluate a Relationship row's caveat (if any). Tri-state.
@@ -846,7 +848,7 @@ class LocalBackend(Backend):
         subject: SubjectRef,
         depth: int,
         cache: dict[tuple[str, str], set[str] | None],
-        context: dict | None = None,
+        context: dict[str, Any] | None = None,
     ) -> set[str]:
         if depth > app_settings.REBAC_DEPTH_LIMIT:
             raise PermissionDepthExceeded(f"Depth limit {app_settings.REBAC_DEPTH_LIMIT} exceeded")
@@ -928,7 +930,7 @@ class LocalBackend(Backend):
         subject: SubjectRef,
         depth: int,
         cache: dict[tuple[str, str], set[str] | None],
-        context: dict | None = None,
+        context: dict[str, Any] | None = None,
     ) -> set[str]:
         """Memoised entry into `_resources_for_expr` keyed by (type, action).
 
@@ -977,7 +979,7 @@ class LocalBackend(Backend):
         subject: SubjectRef,
         depth: int,
         cache: dict[tuple[str, str], set[str] | None] | None = None,
-        context: dict | None = None,
+        context: dict[str, Any] | None = None,
     ) -> set[str]:
         if depth > app_settings.REBAC_DEPTH_LIMIT:
             raise PermissionDepthExceeded(f"Depth limit {app_settings.REBAC_DEPTH_LIMIT} exceeded")
@@ -1081,12 +1083,12 @@ def _collect_direct_relations(expr: PermExpr) -> set[str]:
     return set()
 
 
-def _filter_active(qs: object) -> object:
+def _filter_active(qs: QuerySet[Any]) -> QuerySet[Any]:
     """Exclude expired rows. Postgres-friendly via a parameterised filter."""
     from django.db.models import Q
     from django.utils import timezone
 
-    return qs.filter(Q(expires_at__isnull=True) | Q(expires_at__gt=timezone.now()))  # type: ignore[attr-defined]
+    return qs.filter(Q(expires_at__isnull=True) | Q(expires_at__gt=timezone.now()))
 
 
 def _is_active(row: object) -> bool:
@@ -1095,4 +1097,4 @@ def _is_active(row: object) -> bool:
         return True
     from django.utils import timezone
 
-    return expires_at > timezone.now()
+    return bool(expires_at > timezone.now())

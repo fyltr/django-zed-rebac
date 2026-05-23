@@ -56,7 +56,7 @@ def _capture(captured):
 @override_settings(REBAC_SUPERUSER_BYPASS=True)
 def test_superuser_request_runs_inside_sudo_bracket(superuser):
     PermissionAuditEvent.objects.all().delete()
-    captured: dict = {}
+    captured: dict[str, object] = {}
     mw = ActorMiddleware(_capture(captured))
 
     response = mw(_FakeRequest(superuser))
@@ -77,7 +77,7 @@ def test_superuser_request_runs_inside_sudo_bracket(superuser):
 @override_settings(REBAC_SUPERUSER_BYPASS=True)
 def test_regular_user_request_does_not_open_sudo(regular_user):
     PermissionAuditEvent.objects.all().delete()
-    captured: dict = {}
+    captured: dict[str, object] = {}
     mw = ActorMiddleware(_capture(captured))
 
     mw(_FakeRequest(regular_user))
@@ -96,7 +96,7 @@ def test_inactive_superuser_does_not_open_sudo(db):
     inactive.is_active = False
     inactive.save(update_fields=["is_active"])
 
-    captured: dict = {}
+    captured: dict[str, object] = {}
     mw = ActorMiddleware(_capture(captured))
     mw(_FakeRequest(inactive))
 
@@ -106,7 +106,7 @@ def test_inactive_superuser_does_not_open_sudo(db):
 @pytest.mark.django_db
 @override_settings(REBAC_SUPERUSER_BYPASS=False)
 def test_bypass_disabled_setting_suppresses_sudo(superuser):
-    captured: dict = {}
+    captured: dict[str, object] = {}
     mw = ActorMiddleware(_capture(captured))
     mw(_FakeRequest(superuser))
     assert captured["is_sudo"] is False
@@ -117,7 +117,7 @@ def test_bypass_disabled_setting_suppresses_sudo(superuser):
 def test_allow_sudo_false_suppresses_bypass(superuser):
     """Tenants that globally disable sudo must not get an implicit
     superuser bypass — the safe fail-closed answer."""
-    captured: dict = {}
+    captured: dict[str, object] = {}
     mw = ActorMiddleware(_capture(captured))
     mw(_FakeRequest(superuser))
     assert captured["is_sudo"] is False

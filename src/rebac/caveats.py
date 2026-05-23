@@ -30,6 +30,7 @@ That keeps installations without caveat usage zero-cost.
 from __future__ import annotations
 
 import hashlib
+import importlib.util
 from threading import Lock
 from typing import TYPE_CHECKING, Any
 
@@ -66,13 +67,15 @@ def _load_celpy() -> Any:
             )
         return _CELPY_MODULE
     _CELPY_TRIED = True
-    try:
-        import celpy as _cel
-    except ImportError as exc:  # pragma: no cover - tested via mocked sys.modules
+    # Presence check first so the import below can't raise — keeps the
+    # optional dependency truly optional without guarding the import.
+    if importlib.util.find_spec("celpy") is None:  # pragma: no cover
         raise CaveatUnsupportedError(
             "Caveat evaluation requires cel-python. "
             "Install with `pip install django-zed-rebac[caveats]`."
-        ) from exc
+        )
+    import celpy as _cel
+
     _CELPY_MODULE = _cel
     return _cel
 

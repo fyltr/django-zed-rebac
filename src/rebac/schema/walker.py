@@ -28,7 +28,7 @@ built-in actor terms. Backends do not re-implement any of these.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Protocol
+from typing import Any, Protocol
 
 from ..errors import PermissionDepthExceeded
 from ..types import SubjectRef
@@ -85,7 +85,7 @@ class WalkContext:
 
     schema: Schema
     subject: SubjectRef
-    context: dict | None
+    context: dict[str, Any] | None
     missing: set[str]
     depth_limit: int
     resolve_relation: ResolveRelation

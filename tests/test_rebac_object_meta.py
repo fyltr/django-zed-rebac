@@ -138,6 +138,8 @@ class TestResolveDotted:
 class TestToObjectRefObjectMeta:
     def test_flat_id_attr(self) -> None:
         class MyView(metaclass=RebacObjectMeta):
+            operation: str
+
             class Meta:
                 rebac_resource_type = "angee/view"
                 rebac_id_attr = "operation"
@@ -155,6 +157,8 @@ class TestToObjectRefObjectMeta:
             source = Source()
 
         class MyView(metaclass=RebacObjectMeta):
+            _angee_view_meta: ViewMeta
+
             class Meta:
                 rebac_resource_type = "angee/view"
                 rebac_id_attr = "_angee_view_meta.source.operation"
@@ -189,6 +193,8 @@ class TestToObjectRefObjectMeta:
         """
 
         class MyView(metaclass=RebacObjectMeta):
+            operation: str
+
             class Meta:
                 rebac_resource_type = "angee/view"
                 rebac_id_attr = "operation"

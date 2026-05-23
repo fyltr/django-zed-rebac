@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-__version__ = "0.4.0"
+__version__ = "0.5.0"
 
 default_app_config = "rebac.apps.RebacConfig"
 
@@ -24,6 +24,8 @@ from .actors import (
     ActorLike,
     actor_context,
     anonymous_actor,
+    asudo,
+    asystem_context,
     bearer_token,
     chain_resolvers,
     current_actor,
@@ -64,6 +66,7 @@ from .types import (
 )
 
 if TYPE_CHECKING:
+    from .audit import aemit as aemit_audit_event
     from .audit import emit as emit_audit_event
     from .backends import Backend, LocalBackend, SpiceDBBackend
     from .decorators import rebac_resource, require_permission
@@ -91,6 +94,7 @@ _LAZY = {
     "delete_relationships": ("rebac.relationships", "delete_relationships"),
     "to_object_ref": ("rebac.resources", "to_object_ref"),
     "emit_audit_event": ("rebac.audit", "emit"),
+    "aemit_audit_event": ("rebac.audit", "aemit"),
 }
 
 
@@ -133,7 +137,9 @@ __all__ = [
     "set_current_actor",
     "actor_context",
     "sudo",
+    "asudo",
     "system_context",
+    "asystem_context",
     "to_subject_ref",
     "grant_subject_ref",
     "to_object_ref",
@@ -157,6 +163,7 @@ __all__ = [
     "delete_relationship",
     "delete_relationships",
     "emit_audit_event",
+    "aemit_audit_event",
     # evaluator (proposal 0002)
     "PermissionEvaluator",
     "current_evaluator",

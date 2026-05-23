@@ -24,7 +24,7 @@ from .conf import app_settings
 def resource_id_attr(model_cls: Any) -> str:
     """Return the attribute name used to source a resource's id."""
     attr = getattr(model_cls._meta, "rebac_id_attr", None)
-    return attr or app_settings.REBAC_RESOURCE_ID_ATTR
+    return str(attr or app_settings.REBAC_RESOURCE_ID_ATTR)
 
 
 def subject_id_attr(model_cls: Any) -> str:
@@ -36,7 +36,7 @@ def subject_id_attr(model_cls: Any) -> str:
     versa). Per-model ``Meta.rebac_id_attr`` still wins on either side.
     """
     attr = getattr(model_cls._meta, "rebac_id_attr", None)
-    return attr or app_settings.REBAC_USER_ID_ATTR
+    return str(attr or app_settings.REBAC_USER_ID_ATTR)
 
 
 __all__ = ["resource_id_attr", "subject_id_attr"]

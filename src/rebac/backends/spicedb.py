@@ -7,7 +7,9 @@ not a generic AttributeError.
 
 from __future__ import annotations
 
+import importlib.util
 from collections.abc import Iterable
+from typing import Any
 
 from ..conf import app_settings
 from ..schema.ast import Schema
@@ -34,13 +36,14 @@ class SpiceDBBackend(Backend):
     kind = "spicedb"
 
     def __init__(self) -> None:
-        try:
-            import authzed  # noqa: F401
-        except ImportError as exc:  # pragma: no cover
+        # Presence check without importing — keeps ``authzed`` optional
+        # even though this module is imported unconditionally by
+        # ``rebac.backends``.
+        if importlib.util.find_spec("authzed") is None:  # pragma: no cover
             raise ImportError(
                 "REBAC_BACKEND='spicedb' requires the `authzed` package. "
                 "Install with: pip install django-zed-rebac[spicedb]"
-            ) from exc
+            )
         if not app_settings.REBAC_SPICEDB_ENDPOINT:
             raise RuntimeError("REBAC_SPICEDB_ENDPOINT must be set when REBAC_BACKEND='spicedb'")
         # Real client wiring is deferred to v0.5.
@@ -55,7 +58,7 @@ class SpiceDBBackend(Backend):
         subject: SubjectRef,
         action: str,
         resource: ObjectRef,
-        context: dict | None = None,
+        context: dict[str, Any] | None = None,
         consistency: Consistency | None = None,
         at_zookie: Zookie | None = None,
     ) -> CheckResult:
@@ -67,7 +70,7 @@ class SpiceDBBackend(Backend):
         subject: SubjectRef,
         action: str,
         resource_type: str,
-        context: dict | None = None,
+        context: dict[str, Any] | None = None,
         consistency: Consistency | None = None,
         at_zookie: Zookie | None = None,
     ) -> Iterable[str]:
@@ -79,7 +82,7 @@ class SpiceDBBackend(Backend):
         resource: ObjectRef,
         action: str,
         subject_type: str,
-        context: dict | None = None,
+        context: dict[str, Any] | None = None,
         consistency: Consistency | None = None,
         at_zookie: Zookie | None = None,
     ) -> Iterable[SubjectRef]:

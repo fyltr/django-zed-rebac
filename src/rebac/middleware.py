@@ -4,14 +4,30 @@ Per proposal 0002 also brackets each request with an evaluator scope
 (per-request permission check cache) and a Zookie scope (write-then-read
 freshness propagation, with optional cross-request transport via header
 or session).
+
+Dual-mode (sync + async)
+------------------------
+
+The middleware advertises both ``sync_capable`` and ``async_capable``
+to Django and dispatches on the type of ``get_response`` it receives.
+When mounted in a pure-async middleware stack (ASGI), Django passes a
+coroutine ``get_response`` and the middleware runs entirely on the
+event loop via :meth:`__acall__` — no ``async_to_sync`` bridge, no
+thread hop, and ``asyncio.CancelledError`` on client disconnect
+propagates as a single frame instead of the chained traceback the
+sync-only path produces. When mounted in a sync (WSGI) stack the
+:meth:`__call__` path runs as before.
 """
 
 from __future__ import annotations
 
-from collections.abc import Callable
-from typing import Any
+import inspect
+from collections.abc import Awaitable, Callable
+from typing import Any, cast
 
-from .actors import _current_actor, get_actor_resolver, sudo
+from asgiref.sync import iscoroutinefunction, markcoroutinefunction
+
+from .actors import _current_actor, asudo, get_actor_resolver, sudo
 from .conf import app_settings
 from .consistency import current_zookie, zookie_scope
 from .evaluator import evaluator_scope
@@ -94,23 +110,34 @@ class ActorMiddleware:
     audit row, which is the right fail-closed behaviour.
     """
 
+    sync_capable = True
+    async_capable = True
+
     def __init__(self, get_response: Callable[[Any], Any]) -> None:
         self.get_response = get_response
+        # Detect once at install time. If Django wired us up with a
+        # coroutine ``get_response``, mark our instance callable so
+        # Django treats __call__ as awaitable and skips the
+        # ``async_to_sync`` bridge — that's the whole point of going
+        # dual-mode: collapse the sync↔async sandwich into one frame.
+        self._async_mode = iscoroutinefunction(get_response)
+        if self._async_mode:
+            markcoroutinefunction(self)
 
     def __call__(self, request: Any) -> Any:
+        if self._async_mode:
+            return self.__acall__(request)
         resolver = get_actor_resolver()
         actor_ref = resolver(request)
+        use_sudo = self._should_sudo(request)
+        # ``set`` is the LAST step before ``try:`` so the matching
+        # ``reset`` in ``finally`` is unconditional — every successful
+        # ``set`` must be paired with a ``reset``. Anything that can
+        # raise (the resolver, ``_should_sudo``) must do so *before*
+        # the token is installed.
         actor_token = _current_actor.set(actor_ref)
-        initial_zookie = self._rehydrate_zookie(request)
-        user = getattr(request, "user", None)
-        use_sudo = (
-            app_settings.REBAC_SUPERUSER_BYPASS
-            and app_settings.REBAC_ALLOW_SUDO
-            and user is not None
-            and getattr(user, "is_active", False)
-            and getattr(user, "is_superuser", False)
-        )
         try:
+            initial_zookie = self._rehydrate_zookie(request)
             with evaluator_scope():
                 with zookie_scope(initial=initial_zookie):
                     if use_sudo:
@@ -126,6 +153,52 @@ class ActorMiddleware:
                     return response
         finally:
             _current_actor.reset(actor_token)
+
+    async def __acall__(self, request: Any) -> Any:
+        """Async mirror of :meth:`__call__`.
+
+        ``evaluator_scope`` and ``zookie_scope`` are sync
+        ``@contextmanager``\\ s over ContextVars — safe inside
+        ``async def``. The superuser bracket uses :func:`rebac.asudo`
+        so the audit row is written via ``acreate`` on the event loop
+        instead of hopping to a worker thread. Session-transport reads
+        and writes go through the session backend's ``aget``/``aset``.
+        """
+        resolver = get_actor_resolver()
+        actor_ref = await _aresolve_actor(resolver, request)
+        use_sudo = self._should_sudo(request)
+        # Install the actor token *immediately* before ``try:`` so the
+        # ``finally`` block always pairs with the ``set``. The earlier
+        # ordering put ``await self._arehydrate_zookie(...)`` between
+        # ``set`` and ``try:`` — under client-disconnect
+        # ``asyncio.CancelledError`` mid-await the token leaked
+        # because ``finally`` was not yet in scope. This is the same
+        # ordering invariant the sync path uses.
+        actor_token = _current_actor.set(actor_ref)
+        try:
+            initial_zookie = await self._arehydrate_zookie(request)
+            with evaluator_scope():
+                with zookie_scope(initial=initial_zookie):
+                    if use_sudo:
+                        async with asudo(reason="superuser-bypass"):
+                            response = await self.get_response(request)
+                    else:
+                        response = await self.get_response(request)
+                    await self._apersist_zookie(request, response)
+                    return response
+        finally:
+            _current_actor.reset(actor_token)
+
+    def _should_sudo(self, request: Any) -> bool:
+        """Whether the superuser bypass applies for this request."""
+        user = getattr(request, "user", None)
+        return bool(
+            app_settings.REBAC_SUPERUSER_BYPASS
+            and app_settings.REBAC_ALLOW_SUDO
+            and user is not None
+            and getattr(user, "is_active", False)
+            and getattr(user, "is_superuser", False)
+        )
 
     # ---------- Zookie transport plumbing (opt-in) ----------
 
@@ -176,6 +249,53 @@ class ActorMiddleware:
             if session is not None:
                 session[app_settings.REBAC_ZOOKIE_SESSION_KEY] = str(zookie)
 
+    # ---------- Async variants used by __acall__ ----------
+
+    async def _arehydrate_zookie(self, request: Any) -> Zookie | None:
+        """Async-safe Zookie rehydration.
+
+        Header transport never touches the DB (``request.META`` is an
+        in-memory dict), so it short-circuits to the sync read. Session
+        transport uses ``session.aget`` so the lazy session load happens
+        on the event loop rather than via a sync DB call.
+        """
+        transport = app_settings.REBAC_ZOOKIE_TRANSPORT
+        if transport == "none":
+            return None
+        if transport == "header":
+            return self._rehydrate_zookie(request)
+        if transport == "session":
+            session = getattr(request, "session", None)
+            if session is None:
+                return None
+            raw = await _session_aget(session, app_settings.REBAC_ZOOKIE_SESSION_KEY)
+            if not raw:
+                return None
+            return _safe_parse_zookie(raw)
+        return None
+
+    async def _apersist_zookie(self, request: Any, response: Any) -> None:
+        """Async-safe Zookie persistence — mirror of :meth:`_persist_zookie`."""
+        transport = app_settings.REBAC_ZOOKIE_TRANSPORT
+        if transport == "none":
+            return
+        zookie = current_zookie()
+        if zookie is None:
+            return
+        if transport == "header":
+            # Response headers are an in-memory mapping (HttpResponseBase
+            # exposes both sync ``__setitem__`` and ``headers[...] = ...``);
+            # no DB hit, no need for an async variant.
+            response[app_settings.REBAC_ZOOKIE_HEADER_NAME] = str(zookie)
+        elif transport == "session":
+            session = getattr(request, "session", None)
+            if session is not None:
+                await _session_aset(
+                    session,
+                    app_settings.REBAC_ZOOKIE_SESSION_KEY,
+                    str(zookie),
+                )
+
     @staticmethod
     def _header_meta_key() -> str:
         """Translate the user-visible header name to Django's META key.
@@ -185,6 +305,44 @@ class ActorMiddleware:
         """
         name = app_settings.REBAC_ZOOKIE_HEADER_NAME.upper().replace("-", "_")
         return f"HTTP_{name}"
+
+
+async def _aresolve_actor(
+    resolver: Callable[[Any], Any],
+    request: Any,
+) -> Any:
+    """Invoke the actor resolver, awaiting it if it's a coroutine fn.
+
+    The default :func:`rebac.actors.default_resolver` is sync and only
+    inspects ``request.user`` — no IO, fast under both modes. A
+    downstream resolver that needs to hit the DB (e.g. a bearer-token
+    chain that loads an API-key row) can declare itself ``async def``
+    and the async path will await it without forcing the rest of the
+    chain through a thread.
+    """
+    if iscoroutinefunction(resolver):
+        result = cast(Awaitable[Any], resolver(request))
+        return await result
+    result_sync = resolver(request)
+    if inspect.isawaitable(result_sync):
+        # Resolver returned a coroutine without being declared async
+        # (e.g. wrapped via decorator). Await it.
+        return await result_sync
+    return result_sync
+
+
+async def _session_aget(session: Any, key: str) -> Any:
+    """Read ``key`` from ``session`` via the async ``SessionBase.aget``.
+
+    Django exposes ``aget`` / ``aset`` on every session backend, so the
+    async path never triggers a sync DB call when the session lazily
+    loads on first access.
+    """
+    return await session.aget(key)
+
+
+async def _session_aset(session: Any, key: str, value: Any) -> None:
+    await session.aset(key, value)
 
 
 def _safe_parse_zookie(raw: str) -> Zookie | None:

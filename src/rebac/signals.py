@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Iterable
 from typing import Any
 
+from django.db.models import Model
 from django.db.models.signals import post_delete, post_save, pre_delete, pre_save
 from django.dispatch import receiver
 
@@ -50,7 +51,7 @@ def _maybe_audit_denial(*, actor: SubjectRef | None, action: str, resource: Obje
 
 @receiver(pre_save)
 def _rebac_pre_save(
-    sender: type,
+    sender: type[Model],
     instance: Any,
     raw: bool = False,
     using: Any = None,
@@ -116,7 +117,7 @@ def _rebac_pre_save(
 
 
 @receiver(pre_delete)
-def _rebac_pre_delete(sender: type, instance: Any, using: Any = None, **_: Any) -> None:
+def _rebac_pre_delete(sender: type[Model], instance: Any, using: Any = None, **_: Any) -> None:
     if not isinstance(instance, RebacMixin):
         return
     rebac_type = getattr(sender._meta, "rebac_resource_type", None)
@@ -146,7 +147,7 @@ def _rebac_pre_delete(sender: type, instance: Any, using: Any = None, **_: Any) 
 
 def _enforce_per_field_writes(
     *,
-    sender: type,
+    sender: type[Model],
     instance: Any,
     actor: SubjectRef,
     resource: ObjectRef,
@@ -220,7 +221,7 @@ def _backend_schema() -> Schema | None:
 
 def _dirty_field_names(
     *,
-    sender: type,
+    sender: type[Model],
     instance: Any,
     update_fields: Iterable[str] | None,
 ) -> list[str]:
@@ -296,7 +297,7 @@ def _mark_schema_caches_stale() -> None:
 @receiver(post_delete, sender="rebac.SchemaPermission")
 @receiver(post_save, sender="rebac.SchemaCaveat")
 @receiver(post_delete, sender="rebac.SchemaCaveat")
-def _rebac_schema_rows_changed(sender: type, raw: bool = False, **_: Any) -> None:
+def _rebac_schema_rows_changed(sender: type[Model], raw: bool = False, **_: Any) -> None:
     if raw:
         return
     _mark_schema_caches_stale()
@@ -342,7 +343,7 @@ def _emit_override_audit(
 
 @receiver(post_save, sender="rebac.SchemaOverride")
 def _rebac_override_post_save(
-    sender: type, instance: Any, created: bool, raw: bool = False, **_: Any
+    sender: type[Model], instance: Any, created: bool, raw: bool = False, **_: Any
 ) -> None:
     if raw:
         return
@@ -363,7 +364,7 @@ def _rebac_override_post_save(
 
 
 @receiver(post_delete, sender="rebac.SchemaOverride")
-def _rebac_override_post_delete(sender: type, instance: Any, **_: Any) -> None:
+def _rebac_override_post_delete(sender: type[Model], instance: Any, **_: Any) -> None:
     from .backends import reset_backend
     from .models import PermissionAuditEvent
 
@@ -394,7 +395,7 @@ def _rebac_override_post_delete(sender: type, instance: Any, **_: Any) -> None:
 
 
 @receiver(post_delete)
-def _rebac_cascade_resource(sender: type, instance: Any, **_: Any) -> None:
+def _rebac_cascade_resource(sender: type[Model], instance: Any, **_: Any) -> None:
     """Drop the ``RebacResource`` registry row for a deleted ``RebacMixin`` row.
 
     Listens on every model's ``post_delete``; short-circuits in O(1) when

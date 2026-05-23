@@ -19,6 +19,7 @@ from django.apps import apps
 from django.core.management.base import BaseCommand, CommandError
 from django.utils import timezone
 
+from ...models.resource import RebacResource
 from ...schema.parser import parse_zed, validate_schema
 
 
@@ -205,7 +206,7 @@ class Command(BaseCommand):
 
     def _sync_row(
         self,
-        model_cls: type,
+        model_cls: Any,
         natural_key: dict[str, Any],
         payload: dict[str, Any],
         package: str,
@@ -561,9 +562,9 @@ class Command(BaseCommand):
 
     def _copy_to_registry(
         self,
-        src_model: type,
-        dst_model: type,
-        resource_model: type,
+        src_model: Any,
+        dst_model: Any,
+        resource_model: type[RebacResource],
         batch: int,
     ) -> None:
         """Stream rows from the denormalized table into the registry one.
@@ -613,8 +614,8 @@ class Command(BaseCommand):
 
     def _copy_to_denormalized(
         self,
-        src_model: type,
-        dst_model: type,
+        src_model: Any,
+        dst_model: Any,
         batch: int,
     ) -> None:
         """Stream rows from the registry table into the denormalized one.

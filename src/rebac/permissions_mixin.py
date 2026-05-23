@@ -42,7 +42,7 @@ Surface beyond the canonical contrib.auth methods:
 from __future__ import annotations
 
 from collections.abc import Iterable
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from django.contrib.auth import get_backends
 from django.core.exceptions import PermissionDenied
@@ -148,6 +148,12 @@ class RebacPermissionsMixin(models.Model):
             "Designates that this user has all permissions without explicitly assigning them."
         ),
     )
+
+    if TYPE_CHECKING:
+        # ``is_active`` is contributed by the user base class (typically
+        # ``AbstractBaseUser``) the mixin is composed with. Annotating
+        # it here keeps mypy honest without forcing the import.
+        is_active: bool
 
     class Meta:
         abstract = True

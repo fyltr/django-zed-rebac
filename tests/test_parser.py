@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+
 import pytest
 
 from rebac.schema import (
@@ -10,10 +12,20 @@ from rebac.schema import (
     PermBinOp,
     PermNil,
     PermRef,
+    Relation,
+    Schema,
     parse_zed,
     validate_schema,
 )
 from rebac.schema.parser import ParseError
+
+
+def _relations(schema: Schema, resource_type: str) -> Sequence[Relation]:
+    """Fetch a definition's relations, asserting the definition exists."""
+    definition = schema.get_definition(resource_type)
+    assert definition is not None
+    return definition.relations
+
 
 SAMPLE = """
 // @rebac_package: blog
@@ -135,6 +147,7 @@ def test_permission_names_may_match_top_level_keywords():
 
     assert schema.get_permission("auth/service", "use") is not None
     perm = schema.get_permission("auth/apikey", "authenticate")
+    assert perm is not None
     assert isinstance(perm.expression, PermArrow)
     assert perm.expression.target == "use"
 
@@ -151,6 +164,7 @@ def test_permission_with_parentheses_overrides_precedence():
         """
     )
     perm = schema.get_permission("x/y", "p")
+    assert perm is not None
     assert isinstance(perm.expression, PermBinOp)
     assert perm.expression.op == "+"
     assert isinstance(perm.expression.right, PermBinOp)
@@ -166,6 +180,7 @@ def test_nil_permission():
         """
     )
     perm = schema.get_permission("x/y", "unreachable")
+    assert perm is not None
     assert isinstance(perm.expression, PermNil)
 
 
@@ -180,6 +195,7 @@ def test_builtin_actor_terms_are_valid_permission_refs():
 
     assert validate_schema(schema) == []
     perm = schema.get_permission("auth/user", "credential_lookup")
+    assert perm is not None
     assert isinstance(perm.expression, PermBinOp)
     assert perm.expression.left == PermRef("anonymous")
     assert perm.expression.right == PermRef("authenticated")
@@ -234,7 +250,7 @@ def test_specific_id_subject_without_relation():
         }
         """
     )
-    viewer = next(r for r in schema.get_definition("storage/file").relations if r.name == "viewer")
+    viewer = next(r for r in _relations(schema, "storage/file") if r.name == "viewer")
     assert AllowedSubject(type="angee/role", id="admin") in viewer.allowed_subjects
 
 
@@ -250,7 +266,7 @@ def test_specific_id_subject_with_relation():
         }
         """
     )
-    viewer = next(r for r in schema.get_definition("storage/file").relations if r.name == "viewer")
+    viewer = next(r for r in _relations(schema, "storage/file") if r.name == "viewer")
     assert (
         AllowedSubject(type="angee/role", id="admin", relation="member") in viewer.allowed_subjects
     )
@@ -272,7 +288,7 @@ def test_specific_id_in_union_with_other_shapes():
         }
         """
     )
-    viewer = next(r for r in schema.get_definition("storage/file").relations if r.name == "viewer")
+    viewer = next(r for r in _relations(schema, "storage/file") if r.name == "viewer")
     assert AllowedSubject(type="auth/user") in viewer.allowed_subjects
     assert AllowedSubject(type="auth/user", wildcard=True) in viewer.allowed_subjects
     assert AllowedSubject(type="auth/group", relation="member") in viewer.allowed_subjects

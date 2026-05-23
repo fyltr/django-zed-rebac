@@ -18,7 +18,7 @@ callers writing string kwargs see no shape change.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Self, cast
 
 from django.db import models, transaction
 from django.db.models import Q
@@ -126,10 +126,14 @@ class RebacResource(models.Model):
         if not pairs:
             return {}
         unique_pairs = list({pair for pair in pairs})
-        cls.objects.bulk_create(
-            [cls(resource_type=rt, resource_id=rid) for rt, rid in unique_pairs],
-            ignore_conflicts=True,
+        # ``cls(...)`` is typed as the concrete model rather than ``Self``
+        # by django-stubs, so cast for the ``bulk_create(Iterable[Self])``
+        # signature. ``RebacResource`` is a concrete (non-abstract) model
+        # that is never subclassed, so the cast is sound.
+        objs = cast(
+            "list[Self]", [cls(resource_type=rt, resource_id=rid) for rt, rid in unique_pairs]
         )
+        cls.objects.bulk_create(objs, ignore_conflicts=True)
         # Build the OR-of-AND lookup directly — a naive
         # ``resource_type__in / resource_id__in`` would scan the Cartesian
         # product of the two sets and then post-filter in Python, which

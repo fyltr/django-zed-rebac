@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
+from typing import Any
 from unittest.mock import patch
 
 from django.core import checks
@@ -101,9 +102,11 @@ def _make_field(name, related_model, kind):
     one of (FK, O2O, M2M) so the system check accepts it."""
     from django.db import models
 
-    base = {"fk": models.ForeignKey, "o2o": models.OneToOneField, "m2m": models.ManyToManyField}[
-        kind
-    ]
+    base: Any = {
+        "fk": models.ForeignKey,
+        "o2o": models.OneToOneField,
+        "m2m": models.ManyToManyField,
+    }[kind]
     # Build a minimal subclass that bypasses Field.__init__ — we only need
     # isinstance() and the .name / .related_model attrs.
     instance = base.__new__(base)
@@ -167,11 +170,13 @@ def _set_schema_via_localbackend(schema_text):
     `backend().schema()`. The check itself is agnostic to where
     the schema came from.
     """
-    from rebac.backends import backend, reset_backend
+    from rebac.backends import LocalBackend, backend, reset_backend
     from rebac.schema import parse_zed
 
     reset_backend()
-    backend().set_schema(parse_zed(schema_text))
+    active = backend()
+    assert isinstance(active, LocalBackend)
+    active.set_schema(parse_zed(schema_text))
 
 
 def test_w004_warns_when_role_definition_missing_universal_admin():

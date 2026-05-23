@@ -41,6 +41,13 @@ from rebac.schema.parser import parse_permission_expression
 # ---------------------------------------------------------------------------
 
 
+def _perm_expr(schema: Schema, resource_type: str, perm_name: str) -> object:
+    """Fetch a permission's expression, asserting the permission exists."""
+    perm = schema.get_permission(resource_type, perm_name)
+    assert perm is not None
+    return perm.expression
+
+
 def _baseline_with_perm(resource_type: str, perm_name: str, expr_text: str) -> Schema:
     """Build a one-definition Schema with a single permission row."""
     expr = parse_permission_expression(expr_text)
@@ -119,7 +126,9 @@ def test_tighten_intersects_baseline() -> None:
     baseline = _baseline_with_perm("blog/post", "read", "owner + viewer")
     composed = compose(baseline, [ovr])
 
-    expr = composed.get_permission("blog/post", "read").expression
+    _perm = composed.get_permission("blog/post", "read")
+    assert _perm is not None
+    expr = _perm.expression
     # ((owner + viewer) & is_active)
     assert isinstance(expr, PermBinOp) and expr.op == "&"
     assert isinstance(expr.left, PermBinOp) and expr.left.op == "+"
@@ -136,7 +145,9 @@ def test_loosen_unions_baseline() -> None:
     baseline = _baseline_with_perm("blog/post", "read", "owner")
     composed = compose(baseline, [ovr])
 
-    expr = composed.get_permission("blog/post", "read").expression
+    _perm = composed.get_permission("blog/post", "read")
+    assert _perm is not None
+    expr = _perm.expression
     # (owner + viewer)
     assert isinstance(expr, PermBinOp) and expr.op == "+"
     assert expr.left == PermRef("owner")
@@ -151,7 +162,9 @@ def test_extend_unions_baseline_same_as_loosen() -> None:
     baseline = _baseline_with_perm("blog/post", "read", "owner")
     composed = compose(baseline, [ovr])
 
-    expr = composed.get_permission("blog/post", "read").expression
+    _perm = composed.get_permission("blog/post", "read")
+    assert _perm is not None
+    expr = _perm.expression
     assert isinstance(expr, PermBinOp) and expr.op == "+"
     assert expr.left == PermRef("owner")
     assert expr.right == PermRef("viewer")
@@ -165,7 +178,9 @@ def test_disable_subtracts_baseline() -> None:
     baseline = _baseline_with_perm("blog/post", "read", "owner + viewer + auditor")
     composed = compose(baseline, [ovr])
 
-    expr = composed.get_permission("blog/post", "read").expression
+    _perm = composed.get_permission("blog/post", "read")
+    assert _perm is not None
+    expr = _perm.expression
     # ((owner + viewer + auditor) - auditor)
     assert isinstance(expr, PermBinOp) and expr.op == "-"
     assert expr.right == PermRef("auditor")
@@ -188,7 +203,9 @@ def test_composition_order_extend_then_disable_then_tighten() -> None:
     baseline = _baseline_with_perm("blog/post", "read", "owner")
     composed = compose(baseline, [ext, dis, tig])
 
-    expr = composed.get_permission("blog/post", "read").expression
+    _perm = composed.get_permission("blog/post", "read")
+    assert _perm is not None
+    expr = _perm.expression
     # Outermost is the intersection (∩ tightens applied last).
     assert isinstance(expr, PermBinOp) and expr.op == "&"
     assert expr.right == PermRef("is_active")
@@ -224,9 +241,8 @@ def test_multiple_disables_apply_deterministically_by_created_at() -> None:
 
     # Composition is deterministic: same input set, same AST regardless of
     # input iteration order.
-    assert (
-        composed_a.get_permission("blog/post", "read").expression
-        == composed_b.get_permission("blog/post", "read").expression
+    assert _perm_expr(composed_a, "blog/post", "read") == _perm_expr(
+        composed_b, "blog/post", "read"
     )
 
 
@@ -330,7 +346,7 @@ def test_override_create_invalidates_global_backend_cache() -> None:
 
     # Next call rebuilds; the rebuilt schema reflects the override.
     b2 = backend()
-    expr = b2.schema().get_permission("blog/post", "read").expression
+    expr = _perm_expr(b2.schema(), "blog/post", "read")
     assert isinstance(expr, PermBinOp) and expr.op == "+"
     reset_backend()
 
@@ -359,14 +375,14 @@ def test_override_delete_invalidates_cache() -> None:
 
     reset_backend()
     b1 = backend()
-    expr_with = b1.schema().get_permission("blog/post", "read").expression
+    expr_with = _perm_expr(b1.schema(), "blog/post", "read")
     assert isinstance(expr_with, PermBinOp) and expr_with.op == "+"
 
     # Deletion fires post_delete → reset_backend.
     ovr.delete()
 
     b2 = backend()
-    expr_without = b2.schema().get_permission("blog/post", "read").expression
+    expr_without = _perm_expr(b2.schema(), "blog/post", "read")
     # No override => bare `owner` ref.
     assert expr_without == PermRef("owner")
     reset_backend()

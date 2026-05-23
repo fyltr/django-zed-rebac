@@ -81,7 +81,7 @@ def test_unauthenticated_user_instance_raises():
             app_label = "auth"
 
         @property
-        def is_authenticated(self) -> bool:  # type: ignore[override]
+        def is_authenticated(self) -> bool:
             return False
 
     with pytest.raises(NoActorResolvedError, match="is_authenticated=False"):
@@ -213,13 +213,83 @@ def test_system_context_allowed_when_sudo_disabled():
         assert not is_sudo()
 
 
+# ---------- asudo / asystem_context (async) ----------
+
+
+def test_asudo_requires_reason_when_strict():
+    import asyncio
+
+    from rebac.actors import asudo
+
+    async def _run() -> None:
+        async with asudo():
+            pass
+
+    with pytest.raises(SudoReasonRequiredError):
+        asyncio.run(_run())
+
+
+@pytest.mark.django_db(transaction=True)
+def test_asudo_with_reason_flips_flag_and_writes_audit():
+    """asudo() awaits the audit insert on the loop — no worker-thread hop."""
+    import asyncio
+
+    from rebac.actors import asudo
+    from rebac.models import PermissionAuditEvent
+
+    PermissionAuditEvent.objects.filter(reason="cron.atest").delete()
+
+    async def _run() -> None:
+        assert not is_sudo()
+        async with asudo(reason="cron.atest"):
+            assert is_sudo()
+            assert current_sudo_reason() == "cron.atest"
+        assert not is_sudo()
+
+    asyncio.run(_run())
+    rows = list(PermissionAuditEvent.objects.filter(reason="cron.atest", kind="sudo.bypass"))
+    assert len(rows) == 1
+
+
+def test_asudo_denied_when_disabled():
+    import asyncio
+
+    from rebac.actors import asudo
+
+    async def _run() -> None:
+        async with asudo(reason="request.path"):
+            pass
+
+    with override_settings(REBAC_ALLOW_SUDO=False):
+        with pytest.raises(SudoNotAllowedError):
+            asyncio.run(_run())
+
+
+@pytest.mark.django_db(transaction=True)
+def test_asystem_context_allowed_when_sudo_disabled():
+    """asystem_context bypasses REBAC_ALLOW_SUDO=False, like its sync sibling."""
+    import asyncio
+
+    from rebac.actors import asystem_context
+
+    async def _run() -> None:
+        assert not is_sudo()
+        async with asystem_context(reason="asset.aload"):
+            assert is_sudo()
+            assert current_sudo_reason() == "asset.aload"
+        assert not is_sudo()
+
+    with override_settings(REBAC_ALLOW_SUDO=False):
+        asyncio.run(_run())
+
+
 # ---------- bearer_token ----------
 
 
 class _MetaRequest:
     """Tiny request double that just carries a META dict."""
 
-    def __init__(self, meta: dict | None) -> None:
+    def __init__(self, meta: dict[str, object] | None) -> None:
         if meta is not None:
             self.META = meta
 
@@ -320,7 +390,9 @@ def test_chain_resolvers_skips_resolvers_that_return_none():
         return SubjectRef.of("auth/service", "svc_1")
 
     composed = chain_resolvers(first, second)
-    assert composed(_FakeRequest(user=None)).subject_id == "svc_1"
+    resolved = composed(_FakeRequest(user=None))
+    assert resolved is not None
+    assert resolved.subject_id == "svc_1"
     assert calls == ["first", "second"]
 
 

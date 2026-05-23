@@ -12,7 +12,7 @@ chaining via `_clone()` and propagates into instances via `from_db()`.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, TypeVar
 
 from django.db import models
 
@@ -24,13 +24,18 @@ from .conf import app_settings
 from .errors import MissingActorError, PermissionDenied
 from .types import SubjectRef
 
+_M = TypeVar("_M", bound=models.Model)
 
-class RebacQuerySet(models.QuerySet):
+
+class RebacQuerySet(models.QuerySet[_M]):
     """REBAC-aware queryset.
 
     Use `.with_actor(actor)`, `.as_user(user)`, `.as_agent(agent, on_behalf_of=u)`,
     or `.sudo(reason=...)` to scope. Materialising without any of those AND
     without an ambient actor raises `MissingActorError` when STRICT_MODE is on.
+
+    Generic over the model so the actor verbs preserve the concrete row
+    type: ``Post.objects.filter(...).as_user(u).get()`` stays ``Post``.
     """
 
     # Per-queryset state. Carried through `_clone()`.
@@ -49,7 +54,7 @@ class RebacQuerySet(models.QuerySet):
 
     # ----- Actor verbs -----
 
-    def with_actor(self, actor: Any) -> RebacQuerySet:
+    def with_actor(self, actor: Any) -> RebacQuerySet[_M]:
         """Pin a SubjectRef on the queryset. Generic verb — accepts any ActorLike."""
         ref = actor if isinstance(actor, SubjectRef) else to_subject_ref(actor)
         clone = self._clone()
@@ -57,15 +62,15 @@ class RebacQuerySet(models.QuerySet):
         clone._rebac_sudo_reason = None
         return clone
 
-    def as_user(self, user: Any) -> RebacQuerySet:
+    def as_user(self, user: Any) -> RebacQuerySet[_M]:
         """Typed shorthand: scope to a Django User."""
         return self.with_actor(to_subject_ref(user))
 
-    def as_agent(self, agent: Any, *, on_behalf_of: Any | None = None) -> RebacQuerySet:
+    def as_agent(self, agent: Any, *, on_behalf_of: Any | None = None) -> RebacQuerySet[_M]:
         """Typed shorthand: scope to an agent acting via a Grant."""
         return self.with_actor(grant_subject_ref(agent, on_behalf_of))
 
-    def with_action(self, action: str) -> RebacQuerySet:
+    def with_action(self, action: str) -> RebacQuerySet[_M]:
         """Pin the REBAC permission used for queryset read scoping."""
         if not action:
             raise ValueError("with_action() requires a non-empty action")
@@ -74,14 +79,14 @@ class RebacQuerySet(models.QuerySet):
         clone._rebac_scope_applied = False
         return clone
 
-    def sudo(self, *, reason: str) -> RebacQuerySet:
+    def sudo(self, *, reason: str) -> RebacQuerySet[_M]:
         """Bypass REBAC for this queryset. Mandatory `reason`."""
         return self._bypass(reason=reason, allow_when_sudo_disabled=False)
 
-    def system_context(self, *, reason: str) -> RebacQuerySet:
+    def system_context(self, *, reason: str) -> RebacQuerySet[_M]:
         return self._bypass(reason=reason, allow_when_sudo_disabled=True)
 
-    def _bypass(self, *, reason: str, allow_when_sudo_disabled: bool) -> RebacQuerySet:
+    def _bypass(self, *, reason: str, allow_when_sudo_disabled: bool) -> RebacQuerySet[_M]:
         from .errors import SudoNotAllowedError, SudoReasonRequiredError
 
         if not allow_when_sudo_disabled and not app_settings.REBAC_ALLOW_SUDO:
@@ -153,6 +158,9 @@ class RebacQuerySet(models.QuerySet):
         self._rebac_scope_applied = True
         if sudo:
             return
+        # ``_resolve_effective_actor`` only returns ``sudo=False`` paired
+        # with a non-None actor (the None cases all carry ``sudo=True``).
+        assert actor is not None
         rebac_type = getattr(self.model._meta, "rebac_resource_type", None)
         if not rebac_type:
             return
@@ -161,10 +169,8 @@ class RebacQuerySet(models.QuerySet):
         from .backends import backend
         from .evaluator import current_evaluator
 
-        action = self._rebac_action or getattr(
-            self.model._meta,
-            "rebac_default_action",
-            "read",
+        action = str(
+            self._rebac_action or getattr(self.model._meta, "rebac_default_action", "read")
         )
         active_backend = backend()
         grants_all = getattr(active_backend, "grants_all", None)
@@ -176,13 +182,13 @@ class RebacQuerySet(models.QuerySet):
             return
         # Route through the ambient evaluator when one is open
         # (ActorMiddleware / RebacExtension brackets it); otherwise hit
-        # the backend directly. Proposal 0002 — the legacy
-        # accessible_cached helper is deprecated but kept as an alias.
+        # the backend directly.
         evaluator = current_evaluator()
+        ids: list[Any]
         if evaluator is None:
             ids = list(
                 active_backend.accessible(
-                    subject=actor,  # type: ignore[arg-type]
+                    subject=actor,
                     action=action,
                     resource_type=rebac_type,
                 )
@@ -191,7 +197,7 @@ class RebacQuerySet(models.QuerySet):
             ids = list(
                 evaluator.accessible(
                     active_backend,
-                    subject=actor,  # type: ignore[arg-type]
+                    subject=actor,
                     action=action,
                     resource_type=rebac_type,
                 )
@@ -222,8 +228,10 @@ class RebacQuerySet(models.QuerySet):
         # ``Q.add_q`` works even on sliced queries.
         self.query.add_q(Q(**{f"{attr}__in": ids}))
 
-    def _clone(self, **kwargs: Any) -> RebacQuerySet:  # type: ignore[override]
-        clone = super()._clone(**kwargs)
+    def _clone(self, **kwargs: Any) -> RebacQuerySet[_M]:
+        # ``QuerySet._clone`` is a real method django-stubs intentionally
+        # omits from the public stub surface.
+        clone: RebacQuerySet[_M] = super()._clone(**kwargs)  # type: ignore[misc]
         clone._rebac_actor = self._rebac_actor
         clone._rebac_action = self._rebac_action
         clone._rebac_sudo_reason = self._rebac_sudo_reason
@@ -284,7 +292,9 @@ class RebacQuerySet(models.QuerySet):
     def _guard_bulk_action(self, actor: SubjectRef, action: str) -> None:
         from .backends import backend
 
-        rebac_type = self.model._meta.rebac_resource_type  # type: ignore[attr-defined]
+        rebac_type = getattr(self.model._meta, "rebac_resource_type", None)
+        if not rebac_type:
+            return
         attr = resource_id_attr(self.model)
         # Pre-fetch ids in scope, intersect with allowed.
         affected = {str(v) for v in self.values_list(attr, flat=True)}
@@ -316,7 +326,9 @@ class RebacQuerySet(models.QuerySet):
         from .backends import backend
         from .schema.ast import Schema
 
-        rebac_type = self.model._meta.rebac_resource_type  # type: ignore[attr-defined]
+        rebac_type = getattr(self.model._meta, "rebac_resource_type", None)
+        if not rebac_type:
+            return
         accessor = getattr(backend(), "schema", None)
         if not callable(accessor):
             return
@@ -363,29 +375,40 @@ class RebacQuerySet(models.QuerySet):
 
 
 class RebacManager(models.Manager.from_queryset(RebacQuerySet)):  # type: ignore[misc]
-    """Manager backed by `RebacQuerySet`."""
+    """Manager backed by `RebacQuerySet`.
 
-    def get_queryset(self) -> RebacQuerySet:  # type: ignore[override]
-        return self._queryset_class(
+    Built via ``from_queryset`` so the custom queryset methods (and any
+    subclass supplied through ``RebacManager.from_queryset(...)``) are
+    copied onto the manager. The actor verbs are re-declared with
+    explicit signatures for IDE/type discoverability; the return type is
+    ``RebacQuerySet[Any]`` because the ``from_queryset`` base erases the
+    model parameter — call ``.with_actor(...)`` on a model-typed
+    queryset (e.g. ``Post.objects.all().as_user(u)``) when you need the
+    concrete row type preserved through to ``.get()``.
+    """
+
+    def get_queryset(self) -> RebacQuerySet[Any]:
+        qs: RebacQuerySet[Any] = self._queryset_class(
             model=self.model,
             using=self._db,
             hints=self._hints,
         )
+        return qs
 
-    def with_actor(self, actor: Any) -> RebacQuerySet:
+    def with_actor(self, actor: Any) -> RebacQuerySet[Any]:
         return self.get_queryset().with_actor(actor)
 
-    def as_user(self, user: Any) -> RebacQuerySet:
+    def as_user(self, user: Any) -> RebacQuerySet[Any]:
         return self.get_queryset().as_user(user)
 
-    def as_agent(self, agent: Any, *, on_behalf_of: Any | None = None) -> RebacQuerySet:
+    def as_agent(self, agent: Any, *, on_behalf_of: Any | None = None) -> RebacQuerySet[Any]:
         return self.get_queryset().as_agent(agent, on_behalf_of=on_behalf_of)
 
-    def with_action(self, action: str) -> RebacQuerySet:
+    def with_action(self, action: str) -> RebacQuerySet[Any]:
         return self.get_queryset().with_action(action)
 
-    def sudo(self, *, reason: str) -> RebacQuerySet:
+    def sudo(self, *, reason: str) -> RebacQuerySet[Any]:
         return self.get_queryset().sudo(reason=reason)
 
-    def system_context(self, *, reason: str) -> RebacQuerySet:
+    def system_context(self, *, reason: str) -> RebacQuerySet[Any]:
         return self.get_queryset().system_context(reason=reason)

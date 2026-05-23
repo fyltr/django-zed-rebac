@@ -36,6 +36,8 @@ from __future__ import annotations
 from typing import Any
 
 from django.apps import apps as django_apps
+from django.contrib.auth.base_user import AbstractBaseUser
+from django.db.models import Model
 
 from ..codenames import codename_to_action
 from ..conf import app_settings
@@ -51,7 +53,12 @@ class RebacBackend:
     OAuth, SAML, …) the project uses for sign-in.
     """
 
-    def authenticate(self, request: Any, **credentials: Any) -> None:
+    def authenticate(self, request: Any, **credentials: Any) -> AbstractBaseUser | None:
+        # This backend never claims identity — it only resolves
+        # permissions. Returning ``None`` defers sign-in to whatever
+        # other backend the project configures. The Django-conformant
+        # ``AbstractBaseUser | None`` return type (not bare ``None``)
+        # keeps callers that inspect the result type-correct.
         return None
 
     def get_user(self, user_id: int) -> Any:
@@ -82,6 +89,7 @@ class RebacBackend:
         except NoActorResolvedError:
             return False
 
+        resource: ObjectRef | None
         if obj is not None:
             try:
                 resource = to_object_ref(obj)
@@ -178,7 +186,7 @@ def _model_level_resource_for_perm(perm: str) -> ObjectRef | None:
     return ObjectRef(rebac_type, "")
 
 
-def _resource_type_for_model(model: type) -> str | None:
+def _resource_type_for_model(model: type[Model]) -> str | None:
     """Return the model's ``Meta.rebac_resource_type`` if declared.
 
     Falls back to ``None`` (caller defers to other backends) rather

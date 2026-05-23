@@ -7,8 +7,10 @@ async-task isolation, and stats reporting.
 from __future__ import annotations
 
 from contextvars import copy_context
+from typing import Any
 
 from rebac import (
+    Backend,
     CheckResult,
     ObjectRef,
     PermissionEvaluator,
@@ -18,8 +20,13 @@ from rebac import (
 )
 
 
-class _StubBackend:
-    """Counts calls so tests can assert "exactly one backend hit"."""
+class _StubBackend(Backend):
+    """Counts calls so tests can assert "exactly one backend hit".
+
+    Subclasses :class:`Backend` so it satisfies the evaluator's type
+    contract; only ``check_access`` / ``accessible`` are exercised, the
+    rest raise.
+    """
 
     kind = "local"
 
@@ -38,13 +45,28 @@ class _StubBackend:
         self._check_result = check_result if check_result is not None else CheckResult.has()
         self._accessible_ids = accessible_ids
 
-    def check_access(self, **_: object) -> CheckResult:
+    def check_access(self, **_: Any) -> CheckResult:
         self.check_calls += 1
         return self._check_result
 
-    def accessible(self, **_: object):
+    def accessible(self, **_: Any) -> tuple[str, ...]:
         self.accessible_calls += 1
         return self._accessible_ids
+
+    def lookup_subjects(self, **_: Any) -> list[SubjectRef]:
+        raise NotImplementedError
+
+    def write_relationships(self, *_: Any, **__: Any) -> Any:
+        raise NotImplementedError
+
+    def delete_relationships(self, *_: Any, **__: Any) -> Any:
+        raise NotImplementedError
+
+    def delete_relationship(self, *_: Any, **__: Any) -> Any:
+        raise NotImplementedError
+
+    def schema(self) -> Any:
+        raise NotImplementedError
 
 
 # ---------- ContextVar machinery ----------

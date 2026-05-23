@@ -12,7 +12,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from django.contrib import admin
-from django.db.models import QuerySet
+from django.db.models import Model, QuerySet
 from django.http import HttpRequest
 
 from .models import (
@@ -39,7 +39,7 @@ def _truncate(value: str, limit: int) -> str:
 # ---------------------------------------------------------------------------
 
 
-class _ReadOnlyAdmin(admin.ModelAdmin):
+class _ReadOnlyAdmin(admin.ModelAdmin[Model]):
     def has_add_permission(self, request: HttpRequest) -> bool:
         return False
 
@@ -50,7 +50,7 @@ class _ReadOnlyAdmin(admin.ModelAdmin):
         return False
 
 
-class _ReadOnlyTabularInline(admin.TabularInline):
+class _ReadOnlyTabularInline(admin.TabularInline[Model, Model]):
     extra = 0
 
     def has_add_permission(self, request: HttpRequest, obj: Any = None) -> bool:
@@ -69,7 +69,7 @@ class _ReadOnlyTabularInline(admin.TabularInline):
 
 
 @admin.register(SchemaOverride)
-class SchemaOverrideAdmin(admin.ModelAdmin):
+class SchemaOverrideAdmin(admin.ModelAdmin[SchemaOverride]):
     list_display = (
         "kind",
         "target_label",

@@ -245,7 +245,7 @@ def check_universal_admin_in_roles(
         b: Backend = _backend()
         if not hasattr(b, "schema"):
             return []
-        schema = b.schema()  # type: ignore[attr-defined]
+        schema = b.schema()
     except (DatabaseError, RuntimeError) as exc:  # pragma: no cover — install/test paths
         logging.getLogger("rebac.checks").debug(
             "Universal-admin check skipped: schema unavailable (%s)", exc

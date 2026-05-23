@@ -14,6 +14,9 @@ The mixin must:
 
 from __future__ import annotations
 
+from collections.abc import Iterable
+from typing import Any, cast
+
 import pytest
 from django.core.exceptions import PermissionDenied
 from django.test import override_settings
@@ -22,16 +25,27 @@ from rebac import RebacPermissionsMixin
 
 
 class _FakeUser:
-    """Plain Python user — exercises the methods without a Django row."""
+    """Plain Python user — exercises the methods without a Django row.
+
+    The mixin methods only read ``is_active`` / ``is_superuser`` and walk
+    the configured backends, so a duck-typed object stands in fine. We
+    delegate through ``RebacPermissionsMixin`` rather than subclassing it
+    (it's an abstract Django model that can't be instantiated plainly);
+    the ``self`` cast is the cost of that deliberate duck-typing.
+    """
 
     def __init__(self, *, is_active: bool = True, is_superuser: bool = False) -> None:
         self.is_active = is_active
         self.is_superuser = is_superuser
 
-    # Bound methods picked up by the mixin via descriptor lookup.
-    has_perm = RebacPermissionsMixin.has_perm
-    has_perms = RebacPermissionsMixin.has_perms
-    has_module_perms = RebacPermissionsMixin.has_module_perms
+    def has_perm(self, perm: str, obj: Any = None) -> bool:
+        return RebacPermissionsMixin.has_perm(cast(RebacPermissionsMixin, self), perm, obj)
+
+    def has_perms(self, perm_list: Iterable[str], obj: Any = None) -> bool:
+        return RebacPermissionsMixin.has_perms(cast(RebacPermissionsMixin, self), perm_list, obj)
+
+    def has_module_perms(self, app_label: str) -> bool:
+        return RebacPermissionsMixin.has_module_perms(cast(RebacPermissionsMixin, self), app_label)
 
 
 # ---------- Backend stubs ----------

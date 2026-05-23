@@ -52,7 +52,7 @@ definition blog/post {
 @pytest.fixture(autouse=True)
 def _setup_backend(db):
     reset_backend()
-    backend().set_schema(parse_zed(SCHEMA_TEXT))  # type: ignore[attr-defined]
+    backend().set_schema(parse_zed(SCHEMA_TEXT))
     yield
     reset_backend()
 

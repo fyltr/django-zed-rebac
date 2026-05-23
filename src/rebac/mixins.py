@@ -14,7 +14,7 @@ overrides where the captured values land.
 
 from __future__ import annotations
 
-from typing import Any, Self
+from typing import TYPE_CHECKING, Any, Self
 
 from django.db import models
 from django.db.models.base import ModelBase
@@ -80,6 +80,16 @@ class RebacObjectMeta(type):
         # FileListView._rebac_resource_type == "angee/view"
     """
 
+    # Declared so static analysis knows classes built with this metaclass
+    # carry these attributes (injected by ``_store_rebac_meta`` at class
+    # creation). ``_rebac_resource_type`` is always set (``None`` when no
+    # ``Meta.rebac_resource_type`` was given); the other two only appear
+    # when their Meta keys were supplied, hence the ``ClassVar`` typing
+    # mirrors the runtime "attribute may be absent" contract loosely.
+    _rebac_resource_type: str | None
+    _rebac_id_attr: str
+    _rebac_default_action: str
+
     def __new__(
         mcs,
         name: str,
@@ -114,7 +124,7 @@ class RebacModelBase(RebacObjectMeta, ModelBase):
     """
 
     @staticmethod
-    def _store_rebac_meta(cls: type, captured: dict[str, Any]) -> None:
+    def _store_rebac_meta(cls: type[models.Model], captured: dict[str, Any]) -> None:
         for key, value in captured.items():
             setattr(cls._meta, key, value)
 
@@ -169,6 +179,14 @@ class RebacMixin(models.Model, metaclass=RebacModelBase):
     # forcing the consumer to re-attach via middleware / Celery hook.
     _rebac_actor: SubjectRef | None = None
     _rebac_sudo_reason: str | None = None
+
+    if TYPE_CHECKING:
+        # Set on the instance by ``from_db`` (never class-level — a
+        # class default would survive pickling and defeat the
+        # actor-stripping contract in ``__getstate__``). Snapshot of the
+        # row's loaded field values, used for per-field dirty detection
+        # in pre_save.
+        _rebac_loaded_values: dict[str, Any]
 
     class Meta:
         abstract = True

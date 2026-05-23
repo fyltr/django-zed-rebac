@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "django-zed-rebac"
-version = "0.4.0"
+version = "0.5.0"
 description = "Drop-in REBAC engine for Django, SpiceDB-compatible, with a pure-Django LocalBackend."
 readme = "README.md"
 license = "Apache-2.0"
@@ -15,8 +15,6 @@ keywords = ["django", "rebac", "spicedb", "zanzibar", "authorization", "permissi
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Framework :: Django",
-    "Framework :: Django :: 4.2",
-    "Framework :: Django :: 5.2",
     "Framework :: Django :: 6.0",
     "Intended Audience :: Developers",
     "Programming Language :: Python :: 3",
@@ -24,7 +22,7 @@ classifiers = [
     "Topic :: Security",
 ]
 dependencies = [
-    "django>=4.2",
+    "django>=6.0",
 ]
 
 [project.optional-dependencies]
@@ -43,6 +41,8 @@ dev = [
     "pytest-django>=4.8",
     "ruff>=0.5",
     "mypy>=1.10",
+    "django-stubs[compatible-mypy]>=5.1",
+    "django-stubs-ext>=5.1",
 ]
 
 [project.urls]
@@ -78,12 +78,29 @@ ignore = ["E501"]
 [tool.mypy]
 python_version = "3.14"
 strict = true
-plugins = []
-exclude = ["tests/", "build/"]
+plugins = ["mypy_django_plugin.main"]
+# Generated migration files are not hand-written; Django's Migration base
+# uses class-level ``dependencies`` / ``operations`` that trip strict's
+# class-var-vs-instance-var check.
+exclude = ["build/", ".*/migrations/.*"]
+
+[tool.django-stubs]
+django_settings_module = "tests.settings"
 
 [[tool.mypy.overrides]]
-module = ["authzed.*", "celery.*", "rest_framework.*"]
+module = ["authzed.*", "celery.*", "rest_framework.*", "cel.*", "strawberry.*", "channels.*"]
 ignore_missing_imports = true
+
+# Tests are type-checked, but the per-test ``-> None`` return annotation
+# and typed-fixture-param ceremony adds churn without catching bugs.
+# Keep every value-checking rule (attr-defined, arg-type, union-attr,
+# misc, …) active; only relax the "annotate every def" requirements.
+[[tool.mypy.overrides]]
+module = ["tests.*"]
+disallow_untyped_defs = false
+disallow_incomplete_defs = false
+disallow_untyped_calls = false
+check_untyped_defs = true
 
 
 [tool.ruff.lint.per-file-ignores]

@@ -10,7 +10,7 @@ from .actors import current_actor, is_sudo
 from .errors import NoActorResolvedError, PermissionDenied
 from .resources import rebac_resource as _rebac_resource_register
 from .resources import to_object_ref
-from .types import ObjectRef
+from .types import ObjectRef, SubjectRef
 
 rebac_resource = _rebac_resource_register
 
@@ -48,6 +48,7 @@ def require_permission(
                 return fn(*args, **kwargs)
 
             # Resolve actor.
+            actor_ref: SubjectRef | None
             if actor_arg and actor_arg in kwargs:
                 from .actors import to_subject_ref
 

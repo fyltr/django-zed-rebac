@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import builtins
 from collections.abc import Callable
 from typing import Any
 
@@ -44,11 +45,11 @@ def rebac_resource(*, type: str, id_attr: str = "pk") -> Callable[[type], type]:
     binding — useful for plain Python entities (S3 prefixes, queue names,
     anything stable-id'd).
     """
+    rebac_type = type
+    rebac_id_attr = id_attr
 
-    def _decorator(cls: type) -> type:
-        _resource_registry[cls] = (type, id_attr)
-        cls._rebac_type = type  # type: ignore[attr-defined]
-        cls._rebac_id_attr = id_attr  # type: ignore[attr-defined]
+    def _decorator(cls: builtins.type) -> builtins.type:
+        _resource_registry[cls] = (rebac_type, rebac_id_attr)
         return cls
 
     return _decorator
@@ -65,8 +66,6 @@ def to_object_ref(obj: Any) -> ObjectRef:
     3. **`RebacObjectMeta` class** — non-model resources (views, menus) with
        class-level ``_rebac_resource_type`` captured from a ``Meta`` inner
        class by the :class:`~rebac.mixins.RebacObjectMeta` metaclass.
-    4. **Legacy duck-typed** — instance exposes ``_rebac_type`` /
-       ``_rebac_id_attr`` directly (older ``@rebac_resource`` form).
 
     All paths apply :data:`app_settings.REBAC_TYPE_PREFIX` so the wire form
     is consistent regardless of how the resource was declared.
@@ -99,13 +98,6 @@ def to_object_ref(obj: Any) -> ObjectRef:
                 f"rebac_id_attr={id_attr!r} not found on instance ({exc})."
             ) from exc
         return ObjectRef(_apply_prefix(resource_type), str(resource_id))
-
-    # 4. Legacy duck-typed (instance exposes the markers directly)
-    type_ = getattr(obj, "_rebac_type", None)
-    id_attr = getattr(obj, "_rebac_id_attr", None)
-    if type_ and id_attr:
-        value = getattr(obj, id_attr)
-        return ObjectRef(_apply_prefix(type_), str(value))
 
     raise TypeError(
         f"Cannot resolve {type(obj).__name__} to ObjectRef. "
