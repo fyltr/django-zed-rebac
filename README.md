@@ -191,7 +191,7 @@ This is an **alpha** package. The architecture is settled (see [docs/ARCHITECTUR
 
 - **0.1** — `LocalBackend` MVP, schema parser + sync command, `RebacMixin`, system checks, sync/check commands.
 - **0.2** — Alpha hardening: schema-level built-in actors, action-scoped queryset reads, split `sudo()` / `system_context()`, and efficient schema cache invalidation.
-- **0.3-0.7** — shipped middleware, Celery propagation, registry storage mode, evaluator/Zookie scopes, Strawberry adapter, field-level read gates, and LocalBackend hardening.
+- **0.3-0.8** — shipped middleware, Celery propagation, registry storage mode, evaluator/Zookie scopes, Strawberry adapter, field-level read gates, REBAC-safe relation loading, Strawberry-Django optimizer, and LocalBackend hardening.
 - **Next** — `SpiceDBBackend` adapter and MCP tool integration ([proposal 0004](./docs/proposals/0004-mcp-tool-integration.md)).
 - **1.0** — Stable release with full docs and CI matrix green.
 

@@ -5,6 +5,11 @@ pre-1.0; breaking changes within a minor version are explicitly called out.
 
 ## [Unreleased]
 
+### Documentation
+
+- Updated the README roadmap summary to include the 0.8 relation-loading and
+  Strawberry-Django optimizer work.
+
 ## [0.8.0] — 2026-05-29
 
 ### Added
