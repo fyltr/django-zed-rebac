@@ -11,6 +11,7 @@ from rebac import (
     RelationshipTuple,
     SubjectRef,
     backend,
+    rebac_subject,
     sudo,
     write_relationships,
 )
@@ -19,6 +20,8 @@ from rebac.schema import parse_zed
 
 SCHEMA_TEXT = """
 definition auth/user {}
+definition agents/agent {}
+definition agents/grant {}
 definition auth/group {
     relation member: auth/user
 }
@@ -29,7 +32,7 @@ definition blog/folder {
     permission write = owner + parent->write
 }
 definition blog/post {
-    relation owner: auth/user
+    relation owner: auth/user | agents/agent | agents/grant#valid
     relation viewer: auth/user | auth/group#member | auth/user:*
     relation folder: blog/folder
     permission read = owner + viewer + folder->read
@@ -39,6 +42,12 @@ definition blog/post {
     permission create = owner
 }
 """
+
+
+@rebac_subject(type="agents/agent", id_attr="slug")
+class FakeAgent:
+    def __init__(self, slug: str) -> None:
+        self.slug = slug
 
 
 @pytest.fixture(autouse=True)
@@ -73,12 +82,16 @@ def post(db):
 
 
 def _grant_owner(user, post):
+    _grant_owner_subject(SubjectRef.of("auth/user", str(user.pk)), post)
+
+
+def _grant_owner_subject(subject: SubjectRef, post):
     write_relationships(
         [
             RelationshipTuple(
                 resource=ObjectRef("blog/post", str(post.pk)),
                 relation="owner",
-                subject=SubjectRef.of("auth/user", str(user.pk)),
+                subject=subject,
             ),
         ]
     )
@@ -144,6 +157,48 @@ def test_count_respects_scope(alice, bob, post):
 
     assert Post.objects.as_user(alice).count() == 1
     assert Post.objects.as_user(bob).count() == 0
+
+
+def test_exists_respects_scope(alice, bob, post):
+    _grant_owner(alice, post)
+    from tests.testapp.models import Post
+
+    assert Post.objects.as_user(alice).filter(pk=post.pk).exists() is True
+    assert Post.objects.as_user(bob).filter(pk=post.pk).exists() is False
+
+
+def test_iterator_respects_scope(alice, bob, post):
+    _grant_owner(alice, post)
+    from tests.testapp.models import Post
+
+    assert [row.pk for row in Post.objects.as_user(alice).filter(pk=post.pk).iterator()] == [
+        post.pk
+    ]
+    assert list(Post.objects.as_user(bob).filter(pk=post.pk).iterator()) == []
+
+
+def test_as_agent_scopes_standalone_agent(alice, post):
+    from tests.testapp.models import Post
+
+    agent = FakeAgent("indexer")
+    _grant_owner_subject(SubjectRef.of("agents/agent", "indexer"), post)
+
+    assert list(Post.objects.as_agent(agent).values_list("pk", flat=True)) == [post.pk]
+
+
+def test_as_agent_scopes_agent_grant_on_behalf_of_user(alice, bob, post):
+    from tests.testapp.models import Post
+
+    agent = FakeAgent("assistant")
+    _grant_owner_subject(
+        SubjectRef.of("agents/grant", f"{alice.pk}.assistant", "valid"),
+        post,
+    )
+
+    assert list(Post.objects.as_agent(agent, on_behalf_of=alice).values_list("pk", flat=True)) == [
+        post.pk
+    ]
+    assert list(Post.objects.as_agent(agent, on_behalf_of=bob).values_list("pk", flat=True)) == []
 
 
 def test_bulk_update_denies_rows_actor_cannot_read(alice, bob, post):
@@ -390,6 +445,25 @@ def test_instance_as_user_shorthand_equivalent_to_with_actor(alice, post):
     instance.as_user(alice)
     assert instance.actor() == SubjectRef.of("auth/user", str(alice.pk))
     assert instance.has_access("read") is True
+
+
+def test_instance_as_agent_shorthand_scopes_agent_grant(alice, bob, post):
+    from tests.testapp.models import Post
+
+    agent = FakeAgent("assistant")
+    _grant_owner_subject(
+        SubjectRef.of("agents/grant", f"{alice.pk}.assistant", "valid"),
+        post,
+    )
+    with sudo(reason="test.load"):
+        instance = Post.objects.get(pk=post.pk)
+
+    instance.as_agent(agent, on_behalf_of=alice)
+    assert instance.actor() == SubjectRef.of("agents/grant", f"{alice.pk}.assistant", "valid")
+    assert instance.has_access("read") is True
+
+    instance.as_agent(agent, on_behalf_of=bob)
+    assert instance.has_access("read") is False
 
 
 def test_instance_actor_returns_pinned_subject(alice, post):
