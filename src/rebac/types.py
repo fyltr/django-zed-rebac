@@ -8,7 +8,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import Any
+from typing import Any, Literal
+
+type FieldDenyMode = Literal["allow", "redact", "omit", "raise"]
 
 
 @dataclass(frozen=True, slots=True)

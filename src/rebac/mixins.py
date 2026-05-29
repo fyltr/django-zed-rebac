@@ -21,7 +21,7 @@ from django.db.models.base import ModelBase
 
 from ._id import resource_id_attr
 from .managers import RebacManager
-from .types import CheckResult, Consistency, ObjectRef, SubjectRef
+from .types import CheckResult, Consistency, FieldDenyMode, ObjectRef, SubjectRef
 
 _RECOGNISED_META = (
     "rebac_resource_type",
@@ -179,6 +179,8 @@ class RebacMixin(models.Model, metaclass=RebacModelBase):
     # forcing the consumer to re-attach via middleware / Celery hook.
     _rebac_actor: SubjectRef | None = None
     _rebac_sudo_reason: str | None = None
+    _rebac_field_deny: FieldDenyMode | None = None
+    _rebac_resource_id: str | None = None
 
     if TYPE_CHECKING:
         # Set on the instance by ``from_db`` (never class-level — a
@@ -214,6 +216,10 @@ class RebacMixin(models.Model, metaclass=RebacModelBase):
                 continue
             snapshot[name] = value
         instance._rebac_loaded_values = snapshot
+        try:
+            instance._rebac_resource_id = str(getattr(instance, resource_id_attr(cls)))
+        except Exception:
+            pass
         return instance
 
     def __getstate__(self) -> dict[str, Any]:
@@ -231,6 +237,7 @@ class RebacMixin(models.Model, metaclass=RebacModelBase):
             state.pop("_rebac_actor", None)
             state.pop("_rebac_sudo_reason", None)
             state.pop("_rebac_loaded_values", None)
+            state.pop("_rebac_field_deny", None)
         return state
 
     # ----- Actor / sudo binding -----
@@ -348,7 +355,7 @@ class RebacMixin(models.Model, metaclass=RebacModelBase):
         if self._state.adding:
             resource_id = ""
         else:
-            resource_id = str(getattr(self, resource_id_attr(type(self))))
+            resource_id = self._rebac_resource_id_for_checks()
         return backend().check_access(
             subject=actor,
             action=action,
@@ -366,3 +373,108 @@ class RebacMixin(models.Model, metaclass=RebacModelBase):
     ) -> bool:
         """Boolean shorthand. ``CONDITIONAL_PERMISSION`` collapses to ``False``."""
         return self.check_access(action, context=context, consistency=consistency).allowed
+
+    # ----- Field read gates -----
+
+    def with_field_deny(self, mode: FieldDenyMode) -> Self:
+        """Override ``REBAC_FIELD_READ_MODE`` for explicit instance redaction."""
+        from .field_visibility import validate_field_deny_mode, warn_raise_mode_degrades
+
+        if mode == "raise":
+            warn_raise_mode_degrades(stacklevel=2)
+        self._rebac_field_deny = validate_field_deny_mode(mode)
+        return self
+
+    def denied_read_fields(
+        self,
+        *,
+        context: dict[str, Any] | None = None,
+    ) -> frozenset[str]:
+        """Return gated field names the current actor may not read on this row."""
+        from .conf import app_settings
+        from .field_visibility import gated_read_fields
+        from .types import PermissionResult
+
+        denied: set[str] = set()
+        for field_name in gated_read_fields(type(self)):
+            result = self.check_access(f"read__{field_name}", context=context)
+            if result.allowed:
+                continue
+            if (
+                result.result is PermissionResult.CONDITIONAL_PERMISSION
+                and not app_settings.REBAC_FIELD_READ_FAIL_CLOSED_ON_CONDITIONAL
+            ):
+                continue
+            denied.add(field_name)
+        return frozenset(denied)
+
+    def redacted(
+        self,
+        *,
+        mode: FieldDenyMode | None = None,
+        context: dict[str, Any] | None = None,
+    ) -> Self:
+        """Apply the configured field deny mode to this instance in place."""
+        from .field_visibility import (
+            effective_field_deny_mode,
+            mark_denied_fields,
+            runtime_field_deny_mode,
+            warn_raise_mode_degrades,
+        )
+
+        selected = effective_field_deny_mode(mode or self._rebac_field_deny)
+        if mode == "raise":
+            warn_raise_mode_degrades(stacklevel=2)
+        runtime_mode = runtime_field_deny_mode(selected)
+        if runtime_mode == "allow":
+            return self
+        mark_denied_fields(self, self.denied_read_fields(context=context), mode=runtime_mode)
+        return self
+
+    def save(self, *args: Any, **kwargs: Any) -> None:
+        """Exclude redacted fields from full-row updates.
+
+        Explicit ``save(update_fields=[...])`` remains visible to the signal
+        layer, which fails closed if a redacted field is named.
+        """
+        if not args and not self._state.adding and kwargs.get("update_fields") is None:
+            redacted = frozenset(
+                getattr(self, "_rebac_redacted_fields", frozenset()) or frozenset()
+            )
+            if redacted:
+                kwargs["update_fields"] = self._rebac_update_fields_excluding(redacted)
+        super().save(*args, **kwargs)
+
+    def _rebac_update_fields_excluding(self, excluded: frozenset[str]) -> list[str]:
+        names: list[str] = []
+        loaded: dict[str, Any] | None = getattr(self, "_rebac_loaded_values", None)
+        for field in type(self)._meta.concrete_fields:
+            if field.primary_key:
+                continue
+            if field.name in excluded or field.attname in excluded:
+                continue
+            if loaded is not None:
+                if field.attname not in loaded:
+                    continue
+                current = getattr(self, field.attname, None)
+                if loaded[field.attname] == current:
+                    continue
+            names.append(field.name)
+        return names
+
+    def _rebac_resource_id_for_checks(self) -> str:
+        attr = resource_id_attr(type(self))
+        redacted = frozenset(getattr(self, "_rebac_redacted_fields", frozenset()) or frozenset())
+        field_names = {attr}
+        try:
+            field = type(self)._meta.get_field(attr)
+        except Exception:
+            field = None
+        if field is not None:
+            field_names.add(field.name)
+            field_names.add(getattr(field, "attname", field.name))
+        if redacted & field_names:
+            stored = getattr(self, "_rebac_resource_id", None)
+            if stored is not None:
+                return str(stored)
+        return str(getattr(self, attr))

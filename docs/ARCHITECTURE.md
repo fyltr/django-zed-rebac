@@ -690,6 +690,8 @@ All settings prefixed `REBAC_`. No nested dict. Read via the public `app_setting
 | `REBAC_TYPE_PREFIX` | `""` | `str` | Optional prefix for all generated resource types (multi-tenant SaaS). |
 | `REBAC_SUPERUSER_BYPASS` | `True` | `bool` | If `True`, active superusers short-circuit `has_perm` AND run inside an `ActorMiddleware`-opened `sudo("superuser-bypass")` bracket so QuerySet scoping lifts too. Each elevated request emits a `KIND_SUDO_BYPASS` audit row. Suppressed when `REBAC_ALLOW_SUDO = False`. Strict tenants set this to `False`. |
 | `REBAC_LINT_BARE_PREFETCH` | `False` | `bool` | Opt-in toggle for `rebac.W003` — the structural warning that an RBAC-bound model has an FK / O2O / M2M to another RBAC-bound model (a bare-string `prefetch_related` would JOIN unscoped). Off by default because the check fires for the *existence* of the relation, not for any actual bare-string usage; on a healthy codebase it's pure noise. Flip on for a one-off audit. Goes away once true bare-string prefetch auto-scoping ships. |
+| `REBAC_FIELD_READ_MODE` | `"allow"` | `"allow"` \| `"redact"` \| `"omit"` \| `"raise"` | Deny behavior for schema permissions named `read__<field>`. `"raise"` currently degrades to `"redact"` and emits `rebac.W008` until descriptor-level protected fields land. |
+| `REBAC_FIELD_READ_FAIL_CLOSED_ON_CONDITIONAL` | `True` | `bool` | Bulk field redaction has no per-row caveat context; `True` treats conditional `read__<field>` results as denied. Set `False` only when conditional visibility is acceptable without context. |
 
 Validation runs in the system-checks framework at every `manage.py` invocation. Missing required keys for the chosen backend raise `Error` with check ID `rebac.E001`. Wrong types raise `rebac.E002`. Production-only checks (`--deploy`) include `rebac.W101` for `SPICEDB_TLS = False`.
 
@@ -722,10 +724,12 @@ System checks (in `rebac/checks.py`):
 | `rebac.E003` | Error | A model with `Meta.rebac_resource_type` references a type not declared in any loaded `permissions.zed`. |
 | `rebac.E004` | Error | Permission expressions parse against operator grammar. |
 | `rebac.E005` | Error | `permissions.zed` declared in an `AppConfig` cannot be located on disk. |
+| `rebac.E008` | Error | `REBAC_FIELD_READ_MODE` is not one of `"allow"`, `"redact"`, `"omit"`, or `"raise"`. |
 | `rebac.W001` | Warning | `rebac.backends.RebacBackend` not in `AUTHENTICATION_BACKENDS`. |
 | `rebac.W002` | Warning | A model with `Meta.rebac_resource_type` is missing `RebacMixin`. |
 | `rebac.W003` | Warning | A `prefetch_related("rel")` string-form for an RBAC-flagged related model — should use explicit `Prefetch(...)`. |
 | `rebac.W004` | Warning | A relation has zero `Relationship` rows after 30 days (potential dead schema). |
+| `rebac.W008` | Warning | `REBAC_FIELD_READ_MODE = "raise"` currently degrades to `"redact"` until descriptor-based protected fields land. |
 | `rebac.W101` | Warning (`--deploy`) | `REBAC_SPICEDB_TLS = False` in production. |
 
 Users silence individual checks via Django's `SILENCED_SYSTEM_CHECKS = ["rebac.W001"]`.
@@ -955,6 +959,7 @@ class RebacManager:
     def as_user(self, user) -> RebacQuerySet: ...
     def as_agent(self, agent, *, on_behalf_of=None) -> RebacQuerySet: ...
     def with_action(self, action: str) -> RebacQuerySet: ...           # override read-scope action
+    def on_field_deny(self, mode: FieldDenyMode) -> RebacQuerySet: ... # allow/redact/omit/raise
 
     def sudo(self, *, reason: str) -> RebacQuerySet: ...                # gated by REBAC_ALLOW_SUDO
     def system_context(self, *, reason: str) -> RebacQuerySet: ...      # framework-job bypass, NOT gated
@@ -965,6 +970,7 @@ class RebacQuerySet:
     def as_user(self, user) -> Self: ...
     def as_agent(self, agent, *, on_behalf_of=None) -> Self: ...
     def with_action(self, action: str) -> Self: ...                    # override read-scope action
+    def on_field_deny(self, mode: FieldDenyMode) -> Self: ...          # override field-read deny mode
     def sudo(self, *, reason: str) -> Self: ...                         # gated by REBAC_ALLOW_SUDO
     def system_context(self, *, reason: str) -> Self: ...               # framework-job bypass, NOT gated
 
@@ -984,6 +990,7 @@ The three actor verbs are sugar over the same primitive:
 | `as_user(user)` | Equivalent to `with_actor(to_subject_ref(user))` for a Django `User`. | The HTTP request path: `Post.objects.as_user(request.user)`. |
 | `as_agent(agent, on_behalf_of=u)` | Equivalent to `with_actor(grant_subject_ref(agent, u))` — resolves to an `agents/grant:<id>#valid` subject. | MCP servers and agent runtimes where a Grant is the canonical actor. |
 | `with_action(action)` | Pins the permission used for read-side queryset scoping instead of `read` / `Meta.rebac_default_action`. | Alternate read views such as `credential_lookup`, `list_admin`, or capability-specific resolver scopes. |
+| `on_field_deny(mode)` | Pins the field-read deny mode for `read__<field>` gates instead of the global setting. | Projection-sensitive paths that want `"omit"` while the global default stays `"allow"` or `"redact"`. |
 
 `as_agent(agent)` without `on_behalf_of` resolves to a bare `agents/agent:<id>` subject (the agent acting standalone, with only its declared capabilities — no user grants). Use this only for system-initiated agent runs; for end-user-driven agent runs always pass `on_behalf_of=user`. The `agents/agent` and `agents/grant` definitions are NOT auto-emitted — they live in the consumer's own `agents` app, which references this plugin's `auth/user`.
 
@@ -1030,6 +1037,51 @@ A per-queryset actor (path 1) **always wins** over `current_actor()` (path 3) �
 | `Model.objects.delete()` | `delete` on each row | Same pattern. |
 
 **Failure mode for writes:** *all-or-nothing*. Any denied row in a bulk write raises and rolls back. **Failure mode for reads:** denied rows are absent from the queryset; no raise. List endpoints return `[]` rather than 403 when the user has no rows.
+
+### Field-level read gates (`read__<field>`)
+
+Permissions named `read__<field>` are enforced after a queryset has been
+row-scoped and materialised. The schema syntax is unchanged: `read__title`,
+`read__salary`, and `write__title` are ordinary permission names. The shared
+schema accessor `field_gated_actions(definition, verb)` discovers both read and
+write field gates so the two paths cannot drift.
+
+Field enforcement is opt-in through `REBAC_FIELD_READ_MODE` or
+`.on_field_deny(mode)`. Modes are:
+
+| Mode | Behavior |
+|---|---|
+| `"allow"` | Default. Do not enforce `read__<field>` gates. |
+| `"redact"` | Set denied fields to `None` and record `_rebac_redacted_fields`. |
+| `"omit"` | Same redaction computation, plus `_rebac_omitted_fields` so serializers can drop the key. |
+| `"raise"` | Accepted for forward compatibility, but currently degrades to `"redact"` and emits `rebac.W008`; descriptor-level raising stays with the 1.x `Meta.protected_fields` roadmap item. |
+
+The engine computes visibility per row, not with a blanket `.defer()`. For each
+declared `read__<field>`, it asks the backend for
+`accessible(subject, action="read__<field>", resource_type=...)` through the
+ambient `PermissionEvaluator` when one is open. A row whose resource id is not
+in that set has the field redacted. This preserves cases where Alice may read
+`title` on her own row but not on Bob's row in the same queryset.
+
+Projection querysets that would return gated fields directly, such as
+`.values("salary")`, `.values_list("salary", flat=True)`, or bare `.values()`,
+fail closed under `"redact"` / `"omit"` / `"raise"`. The safe options are to
+materialise model instances and let the field-visibility pass run, or project
+only fields that have no declared `read__<field>` gate.
+
+Single-instance callers can use `instance.with_actor(actor).denied_read_fields()`
+for a pure decision or `instance.redacted(mode="redact")` for an eager in-place
+projection. The instance path goes through `check_access("read__<field>")`, so
+caveat context can be supplied. Bulk materialisation has no per-row caveat
+context and therefore treats `CONDITIONAL_PERMISSION` as denied by default;
+`REBAC_FIELD_READ_FAIL_CLOSED_ON_CONDITIONAL = False` flips conditional fields
+to visible.
+
+Redacted fields are fail-closed on writes. If a caller explicitly saves a
+redacted field via `save(update_fields=[...])`, the pre-save path raises
+`PermissionDenied`. A full `save()` on a redacted instance rewrites
+`update_fields` to exclude redacted fields, preventing a display-time `None`
+from overwriting the stored value.
 
 ---
 
@@ -1431,7 +1483,7 @@ stable across patch releases. `rebac._internal.*` is private.
 | **0.5.0 — `SpiceDBBackend`** | `authzed-py` adapter; `WriteSchema` auto-push; cross-backend contract tests. |
 | **0.6.0 — MCP / GraphQL adapters** | `rebac_mcp_tool` decorator; resolver decorator; FastMCP & strawberry support. |
 | **1.0.0 — Stable release** | Full docs, CI matrix green, audit-log model, `select_related` compiler hook (or carved to 1.1). |
-| **1.x** | `select_related` SQL compiler; bulk operations; `Meta.protected_fields` (descriptor-based field gating for regulated tenants); PostgreSQL RLS defense-in-depth track. |
+| **1.x** | `select_related` SQL compiler; bulk operations; `Meta.protected_fields` (descriptor-based field gating / true `"raise"` mode complementing [`read__<field>`](#field-level-read-gates-readfield)); PostgreSQL RLS defense-in-depth track. |
 
 ---
 

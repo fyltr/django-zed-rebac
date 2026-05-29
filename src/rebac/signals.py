@@ -14,8 +14,9 @@ from .actors import current_actor as _current_actor
 from .actors import is_sudo as _is_sudo
 from .conf import app_settings
 from .errors import MissingActorError, PermissionDenied
+from .field_visibility import backend_schema
 from .mixins import RebacMixin
-from .schema.ast import Schema
+from .schema.walker import field_gated_actions
 from .types import ObjectRef, SubjectRef
 
 
@@ -95,7 +96,7 @@ def _rebac_pre_save(
     if is_create:
         resource_id = ""
     else:
-        resource_id = str(getattr(instance, resource_id_attr(sender)))
+        resource_id = _resource_id_for_existing_instance(sender=sender, instance=instance)
     resource = ObjectRef(rebac_type, resource_id)
     result = backend().check_access(subject=actor, action=action, resource=resource)
     if not result.allowed:
@@ -107,6 +108,12 @@ def _rebac_pre_save(
     # trivially "dirty"; gating create on per-field permissions makes no
     # sense (use ``permission create = ...`` for that).
     if not is_create:
+        _enforce_redacted_field_writes(
+            sender=sender,
+            instance=instance,
+            resource=resource,
+            update_fields=update_fields,
+        )
         _enforce_per_field_writes(
             sender=sender,
             instance=instance,
@@ -145,6 +152,44 @@ def _rebac_pre_delete(sender: type[Model], instance: Any, using: Any = None, **_
 # ---------- Per-field write helpers ----------
 
 
+def _enforce_redacted_field_writes(
+    *,
+    sender: type[Model],
+    instance: Any,
+    resource: ObjectRef,
+    update_fields: Iterable[str] | None,
+) -> None:
+    redacted = frozenset(getattr(instance, "_rebac_redacted_fields", frozenset()) or frozenset())
+    if not redacted or update_fields is None:
+        return
+    requested = set(_normalise_update_field_names(sender=sender, update_fields=update_fields))
+    bad = redacted & requested
+    if bad:
+        names = ", ".join(sorted(bad))
+        raise PermissionDenied(
+            f"Cannot write redacted field(s) {names} on {resource}: "
+            "read__<field> denied on the loaded instance."
+        )
+
+
+def _resource_id_for_existing_instance(*, sender: type[Model], instance: Any) -> str:
+    attr = resource_id_attr(sender)
+    redacted = frozenset(getattr(instance, "_rebac_redacted_fields", frozenset()) or frozenset())
+    field_names = {attr}
+    try:
+        field = sender._meta.get_field(attr)
+    except Exception:
+        field = None
+    if field is not None:
+        field_names.add(field.name)
+        field_names.add(getattr(field, "attname", field.name))
+    if redacted & field_names:
+        stored = getattr(instance, "_rebac_resource_id", None)
+        if stored is not None:
+            return str(stored)
+    return str(getattr(instance, attr))
+
+
 def _enforce_per_field_writes(
     *,
     sender: type[Model],
@@ -172,13 +217,13 @@ def _enforce_per_field_writes(
 
     Pure in-memory comparison; never queries the DB to refresh state.
     """
-    schema = _backend_schema()
+    schema = backend_schema()
     if schema is None:
         return
     definition = schema.get_definition(resource.resource_type)
     if definition is None:
         return
-    declared = {p.name for p in definition.permissions if p.name.startswith("write__")}
+    declared = field_gated_actions(definition, "write")
     if not declared:
         return  # No per-field gates declared — common case, cheap exit.
 
@@ -199,24 +244,6 @@ def _enforce_per_field_writes(
                 f"Denied: {actor} cannot {action} {resource} "
                 f"(field {field_name!r} requires {action})"
             )
-
-
-def _backend_schema() -> Schema | None:
-    """Best-effort: return the backend's in-memory ``Schema`` if it has one.
-
-    LocalBackend exposes ``.schema()``; SpiceDBBackend (post-0.5) won't
-    use an in-process tree the same way, so callers must handle ``None``.
-    """
-    from .backends import backend
-
-    accessor = getattr(backend(), "schema", None)
-    if not callable(accessor):
-        return None
-    try:
-        result = accessor()
-    except Exception:
-        return None
-    return result if isinstance(result, Schema) else None
 
 
 def _dirty_field_names(
@@ -243,16 +270,7 @@ def _dirty_field_names(
     """
     meta = sender._meta
     if update_fields is not None:
-        names: list[str] = []
-        for tok in update_fields:
-            try:
-                field = meta.get_field(tok)
-            except Exception:
-                # Unknown field tag — leave it; Django will reject the save.
-                names.append(tok)
-                continue
-            names.append(field.name)
-        return names
+        return _normalise_update_field_names(sender=sender, update_fields=update_fields)
 
     concrete = [f for f in meta.concrete_fields if not f.primary_key]
     loaded: dict[str, Any] | None = getattr(instance, "_rebac_loaded_values", None)
@@ -269,6 +287,24 @@ def _dirty_field_names(
         elif loaded[attname] != current:
             dirty.append(field.name)
     return dirty
+
+
+def _normalise_update_field_names(
+    *,
+    sender: type[Model],
+    update_fields: Iterable[str],
+) -> list[str]:
+    meta = sender._meta
+    names: list[str] = []
+    for tok in update_fields:
+        try:
+            field = meta.get_field(tok)
+        except Exception:
+            # Unknown field tag — leave it; Django will reject the save.
+            names.append(tok)
+            continue
+        names.append(field.name)
+    return names
 
 
 # ---------------------------------------------------------------------------

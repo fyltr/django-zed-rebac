@@ -108,6 +108,12 @@ _DEFAULTS: dict[str, Any] = {
     # for workloads that genuinely benefit (rare); lower on
     # tight-memory hosts.
     "REBAC_EVALUATOR_CACHE_SIZE": 10_000,
+    # Field-level read gate behavior for schema permissions named
+    # ``read__<field>``. ``"allow"`` is the additive/default-off posture;
+    # ``"raise"`` is accepted for forwards compatibility and degrades to
+    # ``"redact"`` until the descriptor-based protected-fields tier lands.
+    "REBAC_FIELD_READ_MODE": "allow",
+    "REBAC_FIELD_READ_FAIL_CLOSED_ON_CONDITIONAL": True,
     # Cross-request transport for the post-write ``Zookie`` so
     # subsequent reads upgrade to ``at_least_as_fresh``:
     #   - ``"none"``    — single-request scope only (default).

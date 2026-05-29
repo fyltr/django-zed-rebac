@@ -3,6 +3,33 @@
 All notable changes to `django-zed-rebac` are tracked here. The project is in
 pre-1.0; breaking changes within a minor version are explicitly called out.
 
+## [Unreleased]
+
+### Added — field-level read gates (proposal 0003)
+
+- Added `REBAC_FIELD_READ_MODE = "allow" | "redact" | "omit" | "raise"` and
+  `.on_field_deny(mode)` for queryset/manager field-read deny behavior.
+  Schema permissions named `read__<field>` now redact denied fields at
+  materialisation time when enabled; `"omit"` also records
+  `_rebac_omitted_fields` for projection layers. `"raise"` is accepted for
+  forward compatibility and degrades to `"redact"` with system check
+  `rebac.W008`.
+- Added instance helpers `denied_read_fields()`, `with_field_deny()`, and
+  `redacted()` for explicit single-row projection with caveat context.
+- Redacted fields are excluded from full saves and fail closed when explicitly
+  named in `save(update_fields=[...])`, preventing a presentation-time `None`
+  from overwriting stored data.
+- Projection querysets that would return gated fields directly now fail closed
+  in enforced modes, and iterator-based model materialisation applies the same
+  redaction pass as normal queryset evaluation.
+
+### Changed
+
+- Factored shared field-gate discovery into
+  `rebac.schema.walker.field_gated_actions(definition, verb)` and reused the
+  evaluator-aware `accessible()` routing for both row scoping and field
+  visibility.
+
 ## [0.5.0] — 2026-05-23
 
 ### Changed — Django 6.0+ only (BREAKING)

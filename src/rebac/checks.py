@@ -9,6 +9,7 @@ from django.core import checks
 from django.db.utils import DatabaseError
 
 from .conf import app_settings
+from .field_visibility import FIELD_DENY_MODES
 
 
 @checks.register("rebac")
@@ -65,6 +66,33 @@ def check_backend_setting(app_configs: Any = None, **kwargs: Any) -> list[checks
                     id="rebac.E002",
                 )
             )
+    return issues
+
+
+@checks.register("rebac")
+def check_field_read_mode_setting(
+    app_configs: Any = None, **kwargs: Any
+) -> list[checks.CheckMessage]:
+    mode = app_settings.REBAC_FIELD_READ_MODE
+    issues: list[checks.CheckMessage] = []
+    if mode not in FIELD_DENY_MODES:
+        expected = ", ".join(repr(v) for v in sorted(FIELD_DENY_MODES))
+        issues.append(
+            checks.Error(
+                f"REBAC_FIELD_READ_MODE={mode!r} (expected one of {expected})",
+                id="rebac.E008",
+            )
+        )
+        return issues
+    if mode == "raise":
+        issues.append(
+            checks.Warning(
+                "REBAC_FIELD_READ_MODE='raise' is reserved for the 1.x "
+                "descriptor-based protected-fields tier; it currently "
+                "degrades to 'redact'.",
+                id="rebac.W008",
+            )
+        )
     return issues
 
 

@@ -22,7 +22,18 @@ from .actors import grant_subject_ref, to_subject_ref
 from .actors import is_sudo as _is_sudo_ambient
 from .conf import app_settings
 from .errors import MissingActorError, PermissionDenied
-from .types import SubjectRef
+from .field_visibility import (
+    accessible_ids,
+    apply_field_visibility,
+    backend_grants_all,
+    effective_field_deny_mode,
+    gated_read_fields,
+    projection_field_names,
+    runtime_field_deny_mode,
+    validate_field_deny_mode,
+    warn_raise_mode_degrades,
+)
+from .types import FieldDenyMode, SubjectRef
 
 _M = TypeVar("_M", bound=models.Model)
 
@@ -42,12 +53,14 @@ class RebacQuerySet(models.QuerySet[_M]):
     _rebac_actor: SubjectRef | None
     _rebac_action: str | None
     _rebac_sudo_reason: str | None
+    _rebac_field_deny: FieldDenyMode | None
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
         self._rebac_actor = None
         self._rebac_action = None
         self._rebac_sudo_reason = None
+        self._rebac_field_deny = None
 
     # Note: a second `_clone` override below combines the actor + scope-flag
     # propagation; this stub kept for readability.
@@ -77,6 +90,14 @@ class RebacQuerySet(models.QuerySet[_M]):
         clone = self._clone()
         clone._rebac_action = action
         clone._rebac_scope_applied = False
+        return clone
+
+    def on_field_deny(self, mode: FieldDenyMode) -> RebacQuerySet[_M]:
+        """Override ``REBAC_FIELD_READ_MODE`` for this queryset."""
+        if mode == "raise":
+            warn_raise_mode_degrades(stacklevel=2)
+        clone = self._clone()
+        clone._rebac_field_deny = validate_field_deny_mode(mode)
         return clone
 
     def sudo(self, *, reason: str) -> RebacQuerySet[_M]:
@@ -167,41 +188,25 @@ class RebacQuerySet(models.QuerySet[_M]):
         from django.db.models import Q
 
         from .backends import backend
-        from .evaluator import current_evaluator
-
         action = str(
             self._rebac_action or getattr(self.model._meta, "rebac_default_action", "read")
         )
         active_backend = backend()
-        grants_all = getattr(active_backend, "grants_all", None)
-        if callable(grants_all) and grants_all(
+        if backend_grants_all(
+            active_backend,
             subject=actor,
             action=action,
             resource_type=rebac_type,
         ):
             return
-        # Route through the ambient evaluator when one is open
-        # (ActorMiddleware / RebacExtension brackets it); otherwise hit
-        # the backend directly.
-        evaluator = current_evaluator()
-        ids: list[Any]
-        if evaluator is None:
-            ids = list(
-                active_backend.accessible(
-                    subject=actor,
-                    action=action,
-                    resource_type=rebac_type,
-                )
+        ids: list[Any] = list(
+            accessible_ids(
+                active_backend,
+                subject=actor,
+                action=action,
+                resource_type=rebac_type,
             )
-        else:
-            ids = list(
-                evaluator.accessible(
-                    active_backend,
-                    subject=actor,
-                    action=action,
-                    resource_type=rebac_type,
-                )
-            )
+        )
         attr = resource_id_attr(self.model)
         if attr == "pk":
             # Coerce to ints when the PK is integer-typed; leave as
@@ -235,20 +240,71 @@ class RebacQuerySet(models.QuerySet[_M]):
         clone._rebac_actor = self._rebac_actor
         clone._rebac_action = self._rebac_action
         clone._rebac_sudo_reason = self._rebac_sudo_reason
+        clone._rebac_field_deny = self._rebac_field_deny
         # Important: each clone re-applies scope when needed.
         clone._rebac_scope_applied = False
         return clone
 
+    def _effective_field_mode(self) -> FieldDenyMode:
+        return effective_field_deny_mode(self._rebac_field_deny)
+
+    def _guard_projected_field_reads(self, actor: SubjectRef | None, sudo: bool) -> None:
+        if actor is None or sudo:
+            return
+        if runtime_field_deny_mode(self._effective_field_mode()) == "allow":
+            return
+        projected = projection_field_names(self.model, getattr(self, "_fields", None))
+        if projected is None:
+            return
+        gated = gated_read_fields(self.model)
+        if not gated:
+            return
+        requested = gated if not projected else gated & projected
+        if requested:
+            names = ", ".join(f"read__{name}" for name in sorted(requested))
+            raise PermissionDenied(
+                f"Cannot project gated field(s) {names} on {self.model.__name__}: "
+                "field read enforcement requires model-instance materialisation "
+                "or a projection that omits gated fields."
+            )
+
     def _fetch_all(self) -> None:
         if self._result_cache is None:
             self._apply_scope_in_place()
+        actor, sudo = self._resolve_effective_actor()
+        self._guard_projected_field_reads(actor, sudo)
         super()._fetch_all()
         if self._result_cache is not None:
-            actor, _ = self._resolve_effective_actor()
-            if actor is not None:
+            if actor is not None and not sudo:
                 for inst in self._result_cache:
                     if isinstance(inst, models.Model):
                         inst._rebac_actor = actor  # type: ignore[attr-defined]
+                        inst._rebac_field_deny = self._rebac_field_deny  # type: ignore[attr-defined]
+                apply_field_visibility(
+                    self._result_cache,
+                    model=self.model,
+                    actor=actor,
+                    mode=self._effective_field_mode(),
+                )
+
+    def iterator(self, *args: Any, **kwargs: Any) -> Any:
+        if self._result_cache is None:
+            self._apply_scope_in_place()
+        actor, sudo = self._resolve_effective_actor()
+        self._guard_projected_field_reads(actor, sudo)
+        rows = list(super().iterator(*args, **kwargs))
+        if actor is not None and not sudo:
+            for inst in rows:
+                if isinstance(inst, models.Model):
+                    inst._rebac_actor = actor  # type: ignore[attr-defined]
+                    inst._rebac_field_deny = self._rebac_field_deny  # type: ignore[attr-defined]
+            apply_field_visibility(
+                rows,
+                model=self.model,
+                actor=actor,
+                mode=self._effective_field_mode(),
+            )
+        return iter(rows)
 
     # ----- Counts / existence respect scope too -----
 
@@ -325,6 +381,7 @@ class RebacQuerySet(models.QuerySet[_M]):
         """
         from .backends import backend
         from .schema.ast import Schema
+        from .schema.walker import field_gated_actions
 
         rebac_type = getattr(self.model._meta, "rebac_resource_type", None)
         if not rebac_type:
@@ -341,7 +398,7 @@ class RebacQuerySet(models.QuerySet[_M]):
         definition = schema.get_definition(rebac_type)
         if definition is None:
             return
-        declared = {p.name for p in definition.permissions if p.name.startswith("write__")}
+        declared = field_gated_actions(definition, "write")
         if not declared:
             return
 
@@ -363,7 +420,12 @@ class RebacQuerySet(models.QuerySet[_M]):
             if action not in declared:
                 continue
             allowed = set(
-                backend().accessible(subject=actor, action=action, resource_type=rebac_type)
+                accessible_ids(
+                    backend(),
+                    subject=actor,
+                    action=action,
+                    resource_type=rebac_type,
+                )
             )
             denied = affected - allowed
             if denied:
@@ -406,6 +468,9 @@ class RebacManager(models.Manager.from_queryset(RebacQuerySet)):  # type: ignore
 
     def with_action(self, action: str) -> RebacQuerySet[Any]:
         return self.get_queryset().with_action(action)
+
+    def on_field_deny(self, mode: FieldDenyMode) -> RebacQuerySet[Any]:
+        return self.get_queryset().on_field_deny(mode)
 
     def sudo(self, *, reason: str) -> RebacQuerySet[Any]:
         return self.get_queryset().sudo(reason=reason)

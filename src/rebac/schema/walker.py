@@ -208,6 +208,17 @@ def find_permission(definition: Definition, name: str) -> Permission | None:
     return None
 
 
+def field_gated_actions(definition: Definition, verb: str) -> frozenset[str]:
+    """Return permission names of the form ``<verb>__<field>``.
+
+    ``write`` callers use the full action names to preserve the historical
+    ``write__title`` comparison, while read callers strip the same prefix back
+    to model field names at the projection boundary.
+    """
+    prefix = f"{verb}__"
+    return frozenset(p.name for p in definition.permissions if p.name.startswith(prefix))
+
+
 def builtin_actor_matches(name: str, subject: SubjectRef) -> bool:
     """Match the bare schema keywords ``anonymous`` / ``authenticated``.
 

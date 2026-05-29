@@ -259,3 +259,13 @@ def test_bulk_update_gated_field_owner_allowed(alice, post):
     assert n == 1
     with sudo(reason="test.verify"):
         assert Post.objects.get(pk=post.pk).title == "owner-bulk"
+
+
+def test_field_gated_actions_matches_existing_write_gate_discovery():
+    """Shared schema accessor must preserve the old ``write__`` discovery."""
+    from rebac.schema.walker import field_gated_actions
+
+    schema = parse_zed(SCHEMA_TEXT)
+    definition = schema.get_definition("blog/post")
+    assert definition is not None
+    assert field_gated_actions(definition, "write") == frozenset({"write__title"})

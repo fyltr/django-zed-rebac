@@ -136,6 +136,31 @@ permission read = owner - banned                 // exclusion
 permission read = owner + parent->read           // arrow (recurse)
 ```
 
+Field gates are ordinary permissions whose names follow
+`<verb>__<field>`:
+
+```zed
+definition hr/employee {
+    relation owner: auth/user
+    relation manager: auth/user
+
+    permission read = owner + manager
+    permission write = owner + manager
+    permission read__salary = owner
+    permission write__salary = owner
+}
+```
+
+`write__<field>` gates are enforced on instance saves and bulk updates. When
+`REBAC_FIELD_READ_MODE` is set to `"redact"` or `"omit"`, `read__<field>` gates
+are enforced after queryset materialisation: denied fields are set to `None`,
+and `"omit"` additionally records `_rebac_omitted_fields` for serializers that
+drop keys instead of emitting `null`. The default mode is `"allow"` for
+backwards compatibility. Projection querysets that would return a gated field
+directly (`.values("salary")`, `.values_list("salary", flat=True)`, or bare
+`.values()`) fail closed in enforced modes; materialise model instances or
+project only ungated fields.
+
 Two built-in actor terms may appear directly in permission
 expressions:
 

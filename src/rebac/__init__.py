@@ -58,6 +58,7 @@ from .preflight import check_new
 from .types import (
     CheckResult,
     Consistency,
+    FieldDenyMode,
     ObjectRef,
     PermissionResult,
     RelationshipTuple,
@@ -115,6 +116,7 @@ __all__ = [
     "SubjectRef",
     "CheckResult",
     "PermissionResult",
+    "FieldDenyMode",
     "Consistency",
     "Zookie",
     "RelationshipTuple",

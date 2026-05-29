@@ -9,7 +9,11 @@ from unittest.mock import patch
 from django.core import checks
 from django.test import override_settings
 
-from rebac.checks import check_cross_rbac_relations, check_universal_admin_in_roles
+from rebac.checks import (
+    check_cross_rbac_relations,
+    check_field_read_mode_setting,
+    check_universal_admin_in_roles,
+)
 from rebac.conf import app_settings
 
 
@@ -66,6 +70,20 @@ def test_actor_middleware_order_errors_against_configured_authentication_middlew
         errors = checks.run_checks(tags=["rebac"])
     ids = {issue.id for issue in errors}
     assert "rebac.E004" in ids
+
+
+def test_e008_rejects_invalid_field_read_mode():
+    with override_settings(REBAC_FIELD_READ_MODE="explode"):
+        issues = check_field_read_mode_setting()
+    ids = {issue.id for issue in issues}
+    assert "rebac.E008" in ids
+
+
+def test_w008_warns_that_raise_field_read_mode_is_reserved():
+    with override_settings(REBAC_FIELD_READ_MODE="raise"):
+        issues = check_field_read_mode_setting()
+    ids = {issue.id for issue in issues}
+    assert "rebac.W008" in ids
 
 
 # ---------------------------------------------------------------------------
