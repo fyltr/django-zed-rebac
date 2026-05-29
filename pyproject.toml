@@ -36,6 +36,9 @@ strawberry = [
     "strawberry-graphql>=0.220",
     "channels>=4.0",
 ]
+strawberry-django = [
+    "strawberry-graphql-django>=0.86.0",
+]
 dev = [
     "pytest>=8.0",
     "pytest-django>=4.8",
@@ -43,12 +46,13 @@ dev = [
     "mypy>=1.10",
     "django-stubs[compatible-mypy]>=5.1",
     "django-stubs-ext>=5.1",
+    "strawberry-graphql-django>=0.86.0",
 ]
 
 [project.urls]
-Homepage = "https://github.com/apexive/django-zed-rebac"
-Documentation = "https://github.com/apexive/django-zed-rebac/tree/main/docs"
-Issues = "https://github.com/apexive/django-zed-rebac/issues"
+Homepage = "https://github.com/fyltr/django-zed-rebac"
+Documentation = "https://github.com/fyltr/django-zed-rebac/tree/main/docs"
+Issues = "https://github.com/fyltr/django-zed-rebac/issues"
 
 [tool.setuptools.packages.find]
 where = ["src"]
@@ -88,7 +92,15 @@ exclude = ["build/", ".*/migrations/.*"]
 django_settings_module = "tests.settings"
 
 [[tool.mypy.overrides]]
-module = ["authzed.*", "celery.*", "rest_framework.*", "cel.*", "strawberry.*", "channels.*"]
+module = [
+    "authzed.*",
+    "celery.*",
+    "rest_framework.*",
+    "cel.*",
+    "strawberry.*",
+    "strawberry_django.*",
+    "channels.*",
+]
 ignore_missing_imports = true
 
 # Tests are type-checked, but the per-test ``-> None`` return annotation
