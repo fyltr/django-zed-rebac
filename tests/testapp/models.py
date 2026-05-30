@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from django.conf import settings
 from django.db import models
 
 from rebac import RebacMixin
@@ -46,3 +47,16 @@ class SluggedPost(RebacMixin, models.Model):
         app_label = "testapp"
         rebac_resource_type = "blog/sluggedpost"
         rebac_id_attr = "slug"
+
+
+class AuthoredPost(RebacMixin, models.Model):
+    title = models.CharField(max_length=200)
+    author = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="authored_test_posts",
+    )
+
+    class Meta:
+        app_label = "testapp"
+        rebac_resource_type = "blog/authoredpost"

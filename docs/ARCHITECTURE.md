@@ -1,7 +1,7 @@
 # `django-zed-rebac` — Architecture
 
-> Status: **alpha implementation guide** — reflects the 0.8.0 codebase.
-> Last updated: 2026-05-29
+> Status: **alpha implementation guide** — reflects the 0.9.0 codebase.
+> Last updated: 2026-05-30
 > Audience: Django integrators evaluating fit, contributors, framework authors building on top.
 >
 > Companion docs:
@@ -140,7 +140,7 @@ The same flow works in DRF, Celery tasks, GraphQL resolvers, management commands
 |---|---|---|
 | **Subject** | Who is acting. A typed reference: `subject_type:subject_id`. | `auth/user:42`, `agents/agent:claude_v3` |
 | **Resource** | What is being acted upon. A typed reference. | `blog/post:99` |
-| **Relation** | A typed link from a subject to a resource. Rows in the `Relationship` table. | `blog/post:99 #owner @ auth/user:42` |
+| **Relation** | A typed link from a subject to a resource. Usually rows in the `Relationship` table; field-backed structural relations are sourced from a Django FK. | `blog/post:99 #owner @ auth/user:42` |
 | **Permission** | A computed expression over relations. Never stored, always evaluated. | `permission read = owner + viewer` |
 | **Caveat** | A CEL expression evaluated at check time against runtime context. | `permission read = viewer with ip_in_cidr` |
 
@@ -175,14 +175,44 @@ This three-state result mirrors SpiceDB exactly and is critical for layered chec
 │  Loader: applied at app-ready on top of Tier 1                  │
 │  Editor: admins                                                 │
 ├─ Tier 3: RELATIONSHIPS ────────────────────────────────────────┤
-│  Source: signals, sharing UIs, sharing APIs                     │
-│  Store:  Relationship                                           │
+│  Source: signals, sharing UIs, sharing APIs, Django FK fields    │
+│  Store:  Relationship, plus field-backed structural relations    │
 │  Loader: written transactionally; evaluated by CTE              │
 │  Editor: application code + admins                              │
 └────────────────────────────────────────────────────────────────┘
 ```
 
 **Critical invariant:** Tier 1 is the only place new relation types and permission expressions can introduce graph shape. Tier 2 may tighten / loosen / disable / additively extend, but a relation referenced by an override must already exist in some package's `permissions.zed`. This protects against the "admin invents `auditor` relation, no code writes `auditor` rows, every read returns nothing in production" failure mode.
+
+### Field-backed structural relations
+
+A relation may be annotated with `// rebac:field=<field_name>` when the
+relationship is already represented by a forward Django FK or one-to-one field:
+
+```zed
+definition blog/post {
+    relation folder: blog/folder // rebac:field=folder
+    permission read = folder->read
+}
+```
+
+This is library-owned projection metadata, not a new SpiceDB semantic. The
+parser stores it on `Relation.backing`; `rebac sync` persists it on
+`SchemaRelation.backing`; `rebac build-zed` omits it from the generated SpiceDB
+schema.
+
+`LocalBackend` resolves direct checks, arrows, `accessible()`, and
+`lookup_subjects()` from the Django column through the model's `_base_manager`
+so application default managers cannot move the authorization boundary. Tuple
+writes/deletes targeting the backed relation raise `SchemaError` with the
+actionable Django field to update instead.
+
+Only explicit forward FK/one-to-one bindings are supported in this tier. The
+schema validator rejects field-backed relations with multiple subject types,
+subject sets, wildcards, specific ids, caveats, or expiration; the `rebac.E009`
+system check verifies that the Django field exists and points at the declared
+resource type. A future `SpiceDBBackend` projector should use the same
+metadata to materialize those structural relations into SpiceDB tuples.
 
 ---
 
@@ -1537,7 +1567,7 @@ stable across patch releases. `rebac._internal.*` is private.
 |---|---|
 | **0.1.0 — MVP** | `LocalBackend`; schema parser + sync command; `RebacMixin` + manager + signals; `RebacPermission` + `RebacFilterBackend`; system checks; sync/check commands; first test matrix. |
 | **0.2.0 — Alpha hardening** | Schema-level built-in actor grants; action-scoped read querysets; split request-path `sudo()` from framework-job `system_context()`; hot-path schema cache invalidation. |
-| **0.3.0-0.8.0 — shipped alpha core** | `ActorMiddleware`; Celery signal handlers; registry storage mode; evaluator/Zookie scopes; Strawberry adapter; field-level read gates; REBAC-safe relation loading; Strawberry-Django optimizer; LocalBackend hardening. |
+| **0.3.0-0.9.0 — shipped alpha core** | `ActorMiddleware`; Celery signal handlers; registry storage mode; evaluator/Zookie scopes; Strawberry adapter; field-level read gates; REBAC-safe relation loading; Strawberry-Django optimizer; field-backed structural relations; LocalBackend hardening. |
 | **Next — `SpiceDBBackend`** | `authzed-py` adapter; `WriteSchema` auto-push; cross-backend contract tests; SpiceDB Zookie translation. |
 | **Next — MCP adapter** | `rebac_mcp_tool` decorator for FastMCP / official SDK shapes; actor resolution from request metadata; capability/resource gating. See [proposal 0004](./proposals/0004-mcp-tool-integration.md). |
 | **1.0.0 — Stable release** | Full docs, CI matrix green, stable audit/logging contracts, `select_related` compiler hook (or carved to 1.1). |

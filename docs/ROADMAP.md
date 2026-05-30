@@ -8,6 +8,9 @@
   - Outcome: `REBAC_BACKEND = "spicedb"` becomes a supported runtime path,
     with `authzed-py` wiring, schema push, Zookie translation, and
     cross-backend contract tests.
+  - Include: a library-owned projector/reconciler for field-backed structural
+    relations declared with `// rebac:field=...`, so SpiceDB receives ordinary
+    relationship tuples while consumers keep writing normal Django FK fields.
 
 - [ ] Implement MCP tool integration.
   - Why: schema authors can already model MCP tools as resources, but the

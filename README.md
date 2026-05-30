@@ -4,7 +4,7 @@
 
 ---
 
-> **Status: alpha.** The package is published on PyPI and the core local REBAC path is usable: `LocalBackend`, `RebacMixin`/manager, schema parser, `rebac sync`, caveats, expirations, schema overrides, audit events, middleware, system checks, DRF helpers, Celery actor propagation, the Strawberry GraphQL adapter, and a REBAC-safe Strawberry-Django optimizer. `SpiceDBBackend` and MCP integration are roadmap work. Track the milestones at [docs/ARCHITECTURE.md § Roadmap](./docs/ARCHITECTURE.md#roadmap).
+> **Status: alpha.** The package is published on PyPI and the core local REBAC path is usable: `LocalBackend`, `RebacMixin`/manager, schema parser, `rebac sync`, caveats, expirations, schema overrides, audit events, middleware, system checks, DRF helpers, Celery actor propagation, the Strawberry GraphQL adapter, a REBAC-safe Strawberry-Django optimizer, and field-backed structural relations. `SpiceDBBackend` and MCP integration are roadmap work. Track the milestones at [docs/ARCHITECTURE.md § Roadmap](./docs/ARCHITECTURE.md#roadmap).
 
 ---
 
@@ -191,7 +191,7 @@ This is an **alpha** package. The architecture is settled (see [docs/ARCHITECTUR
 
 - **0.1** — `LocalBackend` MVP, schema parser + sync command, `RebacMixin`, system checks, sync/check commands.
 - **0.2** — Alpha hardening: schema-level built-in actors, action-scoped queryset reads, split `sudo()` / `system_context()`, and efficient schema cache invalidation.
-- **0.3-0.8** — shipped middleware, Celery propagation, registry storage mode, evaluator/Zookie scopes, Strawberry adapter, field-level read gates, REBAC-safe relation loading, Strawberry-Django optimizer, and LocalBackend hardening.
+- **0.3-0.9** — shipped middleware, Celery propagation, registry storage mode, evaluator/Zookie scopes, Strawberry adapter, field-level read gates, REBAC-safe relation loading, Strawberry-Django optimizer, field-backed structural relations, and LocalBackend hardening.
 - **Next** — `SpiceDBBackend` adapter and MCP tool integration ([proposal 0004](./docs/proposals/0004-mcp-tool-integration.md)).
 - **1.0** — Stable release with full docs and CI matrix green.
 

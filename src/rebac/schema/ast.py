@@ -48,10 +48,17 @@ class AllowedSubject:
 
 
 @dataclass(frozen=True, slots=True)
+class FieldBinding:
+    attname: str
+    kind: str = "fk"
+
+
+@dataclass(frozen=True, slots=True)
 class Relation:
     name: str
     allowed_subjects: tuple[AllowedSubject, ...]
     with_expiration: bool = False
+    backing: FieldBinding | None = None
 
 
 # ---------- Permission expression AST ----------

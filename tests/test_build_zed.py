@@ -250,6 +250,33 @@ def test_build_zed_preserves_specific_id_in_subject_terms(
     assert "angee/role:editor#member" in text
 
 
+def test_build_zed_omits_field_backing_directive(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    stub_app: Any,
+) -> None:
+    out = tmp_path / "effective.zed"
+    text = _run_build(
+        monkeypatch,
+        [
+            stub_app(
+                name="acme.blog",
+                schema_text="""\
+definition blog/folder {}
+definition blog/post {
+    relation folder: blog/folder // rebac:field=folder
+}
+""",
+                label="field_backed",
+            )
+        ],
+        out,
+    )
+
+    assert "rebac:field" not in text
+    assert "relation folder: blog/folder" in text
+
+
 def test_build_zed_specific_id_determinism(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, stub_app: Any
 ) -> None:

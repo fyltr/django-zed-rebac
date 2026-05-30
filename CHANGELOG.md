@@ -5,10 +5,32 @@ pre-1.0; breaking changes within a minor version are explicitly called out.
 
 ## [Unreleased]
 
+## [0.9.0] — 2026-05-30
+
+### Added
+
+- Added explicit field-backed structural relations via
+  `// rebac:field=<field>`, allowing `LocalBackend` to resolve forward FK and
+  one-to-one relations from Django model fields instead of duplicate
+  `Relationship` rows.
+- Added `SchemaRelation.backing`, parser/AST support, and `rebac.E009` system
+  checks for field binding mismatches.
+- Added `auth/user` target support for field-backed relations, honoring
+  `REBAC_USER_ID_ATTR`.
+
+### Fixed
+
+- Field-backed relations now fail loudly if their declared binding cannot
+  resolve instead of falling back to stale stored tuples.
+- Tuple writes/deletes to field-backed relations now raise `SchemaError` with
+  the Django field to update instead.
+
 ### Documentation
 
-- Updated the README roadmap summary to include the 0.8 relation-loading and
-  Strawberry-Django optimizer work.
+- Documented field-backed relations in the ZED and architecture guides, added
+  proposal 0005, and recorded SpiceDB projection/reconciliation as phase 2.
+- Updated the README roadmap summary to include the 0.8 relation-loading,
+  Strawberry-Django optimizer, and 0.9 field-backed relation work.
 
 ## [0.8.0] — 2026-05-29
 

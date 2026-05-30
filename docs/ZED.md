@@ -1,6 +1,6 @@
 # Defining Permissions in `django-zed-rebac`
 
-> Last updated: 2026-05-29
+> Last updated: 2026-05-30
 > Status: **alpha implementation guide**.
 > Audience: Django developers writing permission schemas. Read [ARCHITECTURE.md](./ARCHITECTURE.md) first for the system design.
 
@@ -125,6 +125,26 @@ relation viewer: auth/user | auth/group#member          // union with subject se
 relation viewer: auth/user | auth/user:*                // union with wildcard
 relation viewer: auth/user with ip_in_cidr              // with caveat
 ```
+
+Structural to-one relations that already exist as Django fields can be
+declared as field-backed:
+
+```zed
+definition blog/post {
+    relation folder: blog/folder // rebac:field=folder
+
+    permission read = folder->read
+}
+```
+
+For `LocalBackend`, `post#folder` is read from `Post.folder` directly instead
+of from a duplicate `Relationship` row. Tuple writes/deletes for that relation
+raise `SchemaError`; update the Django field instead. Field-backed relations
+must point at exactly one concrete resource type: no subject sets, wildcards,
+specific ids, caveats, or expiration. The `rebac.E009` system check verifies
+that the named field exists and points at the schema's declared type. The
+`rebac build-zed` output omits the comment directive, so the emitted schema
+remains valid SpiceDB `.zed`.
 
 **Permissions** — computed expressions over relations:
 

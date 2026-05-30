@@ -46,6 +46,16 @@ def model_resource_type(model_cls: Any) -> str | None:
     return _apply_prefix(str(rebac_type))
 
 
+def model_for_resource_type(resource_type: str) -> Any | None:
+    """Return the Django model declaring ``resource_type``, if one exists."""
+    from django.apps import apps
+
+    for model in apps.get_models():
+        if model_resource_type(model) == resource_type:
+            return model
+    return None
+
+
 def model_resource_id(obj: Any) -> str:
     """Resolve a model instance's configured REBAC id attribute."""
     attr = resource_id_attr(type(obj))

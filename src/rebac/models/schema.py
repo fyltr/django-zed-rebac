@@ -22,6 +22,9 @@ class SchemaRelation(models.Model):
     name = models.CharField(max_length=64)
     # Array of `{"type": "...", "relation": "...", "wildcard": bool}`.
     allowed_subjects = models.JSONField(default=list)
+    # Optional `{"attname": "folder", "kind": "fk"}` binding for relations
+    # sourced from a Django model field instead of stored tuple rows.
+    backing = models.JSONField(null=True, blank=True, default=None)
     caveat = models.CharField(max_length=64, blank=True, default="")
     with_expiration = models.BooleanField(default=False)
 

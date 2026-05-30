@@ -213,6 +213,11 @@ class Command(BaseCommand):
                             natural_key={"definition": schema_def, "name": r.name},
                             payload={
                                 "allowed_subjects": allowed,
+                                "backing": (
+                                    {"attname": r.backing.attname, "kind": r.backing.kind}
+                                    if r.backing is not None
+                                    else None
+                                ),
                                 "caveat": "",
                                 "with_expiration": r.with_expiration,
                             },

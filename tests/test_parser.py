@@ -8,6 +8,7 @@ import pytest
 
 from rebac.schema import (
     AllowedSubject,
+    FieldBinding,
     PermArrow,
     PermBinOp,
     PermNil,
@@ -89,6 +90,55 @@ def test_parses_full_schema():
 
     gated = next(r for r in post.relations if r.name == "gated")
     assert gated.allowed_subjects[0].with_caveat == "ip_in_cidr"
+
+
+def test_relation_comment_directive_lifts_field_binding():
+    schema = parse_zed(
+        """
+        definition blog/folder {}
+        definition blog/post {
+            relation folder: blog/folder // rebac:field=folder
+            permission read = folder->read
+        }
+        """
+    )
+
+    folder = next(r for r in _relations(schema, "blog/post") if r.name == "folder")
+    assert folder.backing == FieldBinding(attname="folder")
+
+
+@pytest.mark.parametrize(
+    "relation_line, expected",
+    [
+        ("relation folder: blog/folder | auth/user // rebac:field=folder", "exactly one"),
+        ("relation folder: blog/folder#member // rebac:field=folder", "concrete type"),
+        ("relation folder: blog/folder:* // rebac:field=folder", "concrete type"),
+        ("relation folder: blog/folder:root // rebac:field=folder", "concrete type"),
+        ("relation folder: blog/folder with expiration // rebac:field=folder", "expiration"),
+        ("relation folder: blog/folder with ip_in_cidr // rebac:field=folder", "caveat"),
+    ],
+)
+def test_validate_schema_rejects_non_concrete_field_backed_relations(
+    relation_line: str,
+    expected: str,
+) -> None:
+    schema = parse_zed(
+        f"""
+        caveat ip_in_cidr(ip ipaddress, cidr string) {{
+            ip.in_cidr(cidr)
+        }}
+        definition auth/user {{}}
+        definition blog/folder {{
+            relation member: auth/user
+        }}
+        definition blog/post {{
+            {relation_line}
+        }}
+        """
+    )
+
+    errors = validate_schema(schema)
+    assert any("blog/post#folder" in error and expected in error for error in errors)
 
 
 def test_permission_expression_precedence():

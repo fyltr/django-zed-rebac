@@ -18,6 +18,7 @@ from .ast import (
     Caveat,
     CaveatParam,
     Definition,
+    FieldBinding,
     PermArrow,
     PermBinOp,
     PermExpr,
@@ -29,6 +30,9 @@ from .ast import (
 )
 
 _HEADER_RE = re.compile(r"^//\s*@(?P<key>[A-Za-z_][A-Za-z0-9_]*)\s*:\s*(?P<value>.+?)\s*$")
+_FIELD_DIRECTIVE_RE = re.compile(
+    r"//\s*rebac:field\s*=\s*(?P<attname>[A-Za-z_][A-Za-z0-9_]*)\s*$"
+)
 _TYPE_NAME_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*(?:/[A-Za-z_][A-Za-z0-9_]*)*")
 _IDENT_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 
@@ -139,6 +143,7 @@ class _Parser:
         self.text = text
         self.tokens = _tokenize(text)
         self.pos = 0
+        self.field_directives_by_line = self._extract_field_directives()
 
     # ----- helpers -----
     def peek(self, offset: int = 0) -> Token:
@@ -213,6 +218,30 @@ class _Parser:
                 headers[m.group("key")] = m.group("value")
         return headers
 
+    def _extract_field_directives(self) -> dict[int, str]:
+        directives: dict[int, str] = {}
+        for lineno, line in enumerate(self.text.splitlines(), start=1):
+            comment_start = line.find("//")
+            if comment_start == -1:
+                continue
+            m = _FIELD_DIRECTIVE_RE.match(line[comment_start:].strip())
+            if m:
+                directives[lineno] = m.group("attname")
+        return directives
+
+    def _field_binding_between(self, *, start_line: int, end_line: int) -> FieldBinding | None:
+        matches = [
+            (line, attname)
+            for line, attname in self.field_directives_by_line.items()
+            if start_line <= line <= end_line
+        ]
+        if not matches:
+            return None
+        if len(matches) > 1:
+            lines = ", ".join(str(line) for line, _attname in matches)
+            raise ParseError(f"Multiple rebac:field directives on relation ending at lines {lines}")
+        return FieldBinding(attname=matches[0][1])
+
     # ----- definition -----
     def _parse_definition(self) -> Definition:
         self.expect("keyword", "definition")
@@ -237,7 +266,7 @@ class _Parser:
         return Definition(resource_type, tuple(relations), tuple(permissions))
 
     def _parse_relation(self) -> Relation:
-        self.expect("keyword", "relation")
+        relation_tok = self.expect("keyword", "relation")
         name = self.expect_name().value
         self.expect("punct", ":")
         subjects = self._parse_subject_union()
@@ -250,7 +279,12 @@ class _Parser:
                     f"Expected 'expiration' after 'with' at line {ident.line}; got {ident.value!r}"
                 )
             with_expiration = True
-        return Relation(name, tuple(subjects), with_expiration)
+        last_token = self.tokens[self.pos - 1]
+        backing = self._field_binding_between(
+            start_line=relation_tok.line,
+            end_line=last_token.line,
+        )
+        return Relation(name, tuple(subjects), with_expiration, backing)
 
     def _parse_subject_union(self) -> list[AllowedSubject]:
         subjects = [self._parse_subject_term()]
@@ -500,7 +534,34 @@ def validate_schema(schema: Schema) -> list[str]:
                     f"{definition.resource_type}#{relation.name}: "
                     "reserved built-in actors cannot be declared as relations"
                 )
+            if relation.backing is not None:
+                if relation.backing.kind != "fk":
+                    errors.append(
+                        f"{definition.resource_type}#{relation.name}: "
+                        f"unsupported field backing kind {relation.backing.kind!r}"
+                    )
+                if len(relation.allowed_subjects) != 1:
+                    errors.append(
+                        f"{definition.resource_type}#{relation.name}: "
+                        "field-backed relation must declare exactly one subject type"
+                    )
+                if relation.with_expiration:
+                    errors.append(
+                        f"{definition.resource_type}#{relation.name}: "
+                        "field-backed relation cannot use expiration"
+                    )
             for sub in relation.allowed_subjects:
+                if relation.backing is not None:
+                    if sub.wildcard or sub.relation or sub.id:
+                        errors.append(
+                            f"{definition.resource_type}#{relation.name}: "
+                            "field-backed relation must point at one concrete type"
+                        )
+                    if sub.with_caveat:
+                        errors.append(
+                            f"{definition.resource_type}#{relation.name}: "
+                            "field-backed relation cannot use a caveat"
+                        )
                 if sub.type in BUILTIN_ACTOR_TYPES:
                     errors.append(
                         f"{definition.resource_type}#{relation.name}: "

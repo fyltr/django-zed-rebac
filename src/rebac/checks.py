@@ -95,6 +95,35 @@ def check_field_read_mode_setting(
     return issues
 
 
+@checks.register("rebac")
+def check_field_backed_relations(
+    app_configs: Any = None,
+    **kwargs: Any,
+) -> list[checks.CheckMessage]:
+    """Validate schema-declared ``// rebac:field=...`` model bindings."""
+    try:
+        from .backends import backend as _backend
+        from .backends.base import Backend
+        from .field_backing import field_backing_model_errors
+
+        b: Backend = _backend()
+        if not hasattr(b, "schema"):
+            return []
+        schema = b.schema()
+    except (DatabaseError, RuntimeError) as exc:  # pragma: no cover — install/test paths
+        logging.getLogger("rebac.checks").debug(
+            "Field-backed relation check skipped: schema unavailable (%s)", exc
+        )
+        return []
+
+    issues: list[checks.CheckMessage] = []
+    for definition in schema.definitions:
+        for relation in definition.relations:
+            for error in field_backing_model_errors(definition, relation):
+                issues.append(checks.Error(error, id="rebac.E009"))
+    return issues
+
+
 @checks.register("rebac", deploy=True)
 def check_production_settings(app_configs: Any = None, **kwargs: Any) -> list[checks.CheckMessage]:
     issues: list[checks.CheckMessage] = []
