@@ -23,6 +23,11 @@ pre-1.0; breaking changes within a minor version are explicitly called out.
 - `// rebac:const=<id>` accepts the full SpiceDB object-id grammar (hyphens,
   leading digits / ULIDs / sqids, and `/ _ | = +`), not just Python-identifier
   ids — a target id like `role-admin` no longer silently parses as un-backed.
+- Two new system checks for const-backed relations: `rebac.E009` now also rejects
+  a const relation whose **target type** has no schema definition (a typo that
+  would otherwise silently deny), and `rebac.E010` rejects const arrows that form
+  an evaluation **cycle** (which would recurse to the depth limit on every check)
+  — both caught at `manage.py check` / `rebac sync --check` time.
 
 ### Fixed
 

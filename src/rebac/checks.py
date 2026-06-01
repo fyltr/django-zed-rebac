@@ -104,7 +104,12 @@ def check_field_backed_relations(
     try:
         from .backends import backend as _backend
         from .backends.base import Backend
-        from .field_backing import const_backing_model_errors, field_backing_model_errors
+        from .field_backing import (
+            const_arrow_cycle_errors,
+            const_backing_model_errors,
+            const_target_definition_errors,
+            field_backing_model_errors,
+        )
 
         b: Backend = _backend()
         if not hasattr(b, "schema"):
@@ -123,6 +128,13 @@ def check_field_backed_relations(
                 issues.append(checks.Error(error, id="rebac.E009"))
             for error in const_backing_model_errors(definition, relation):
                 issues.append(checks.Error(error, id="rebac.E009"))
+    # Schema-level const checks (no Django model needed): a const arrow's target
+    # type must resolve to a definition, and const arrows must not form an
+    # evaluation cycle that would recurse to the depth limit on every check.
+    for error in const_target_definition_errors(schema):
+        issues.append(checks.Error(error, id="rebac.E009"))
+    for error in const_arrow_cycle_errors(schema):
+        issues.append(checks.Error(error, id="rebac.E010"))
     return issues
 
 

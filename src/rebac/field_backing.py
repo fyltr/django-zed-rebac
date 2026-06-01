@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from dataclasses import dataclass
 from typing import Any
 
@@ -12,7 +13,16 @@ from django.db import models
 from ._id import resource_id_attr, subject_id_attr
 from .conf import app_settings
 from .resources import model_for_resource_type, model_resource_type
-from .schema.ast import ConstBinding, Definition, FieldBinding, Relation
+from .schema.ast import (
+    ConstBinding,
+    Definition,
+    FieldBinding,
+    PermArrow,
+    PermBinOp,
+    PermExpr,
+    Relation,
+    Schema,
+)
 from .types import SubjectRef
 
 
@@ -151,6 +161,115 @@ def const_backing_model_errors(definition: Definition, relation: Relation) -> li
             "requires a Django model with matching Meta.rebac_resource_type"
         ]
     return []
+
+
+def const_target_definition_errors(schema: Schema) -> list[str]:
+    """Return errors for const-backed relations whose target type is undefined.
+
+    A const relation points every row at ``<target_type>:<id>``; the target type
+    need not be a Django model (it is commonly a virtual role namespace), but it
+    *must* resolve to a schema ``definition`` — otherwise the arrow walk hits
+    ``get_definition(...) is None`` and silently denies, turning a target-type
+    typo (``org/rol`` for ``org/role``) into an invisible deny. Run against the
+    effective (merged) schema so cross-package targets are present.
+    """
+    defined = {d.resource_type for d in schema.definitions}
+    errors: list[str] = []
+    for definition in schema.definitions:
+        for relation in definition.relations:
+            if not isinstance(relation.backing, ConstBinding):
+                continue
+            if len(relation.allowed_subjects) != 1:
+                continue  # multi-subject is already rejected by validate_schema
+            target_type = relation.allowed_subjects[0].type
+            if target_type not in defined:
+                errors.append(
+                    f"{definition.resource_type}#{relation.name}: const-backed relation "
+                    f"targets {target_type!r}, which has no schema definition"
+                )
+    return sorted(errors)
+
+
+def const_arrow_cycle_errors(schema: Schema) -> list[str]:
+    """Return an error if const arrows form an evaluation cycle.
+
+    A const arrow ``via->target`` (``via`` const-backed, pointing at type ``T``)
+    evaluates permission ``target`` on the *fixed* object ``T:<const>``. A stored
+    arrow terminates because a cyclic graph needs real rows; a const arrow always
+    has its synthetic edge, so two types whose const arrows point back at each
+    other recurse over ``(type, permission)`` until ``PermissionDepthExceeded``
+    on *every* check, with no clean deny. Detect the cycle statically at load.
+    """
+    # Directed graph over (resource_type, permission) nodes, following only the
+    # const-arrow edges. A non-permission arrow target (a relation) or a target
+    # type with no matching permission is simply a node with no outgoing edges.
+    edges: dict[tuple[str, str], set[tuple[str, str]]] = {}
+    for definition in schema.definitions:
+        const_targets = {
+            r.name: r.allowed_subjects[0].type
+            for r in definition.relations
+            if isinstance(r.backing, ConstBinding) and len(r.allowed_subjects) == 1
+        }
+        if not const_targets:
+            continue
+        for perm in definition.permissions:
+            node = (definition.resource_type, perm.name)
+            for arrow in _const_arrows_in(perm.expression, const_targets):
+                edges.setdefault(node, set()).add((const_targets[arrow.via], arrow.target))
+
+    cycle = _find_const_arrow_cycle(edges)
+    if cycle is None:
+        return []
+    path = " -> ".join(f"{rtype}#{perm}" for rtype, perm in cycle)
+    return [
+        f"const-backed relation arrow cycle: {path} — evaluation would recurse "
+        "until the depth limit on every permission check"
+    ]
+
+
+def _const_arrows_in(expr: PermExpr, const_relations: dict[str, str]) -> Iterator[PermArrow]:
+    """Yield the const-backed arrows (``via`` in ``const_relations``) in ``expr``."""
+    if isinstance(expr, PermArrow):
+        if expr.via in const_relations:
+            yield expr
+    elif isinstance(expr, PermBinOp):
+        yield from _const_arrows_in(expr.left, const_relations)
+        yield from _const_arrows_in(expr.right, const_relations)
+
+
+def _find_const_arrow_cycle(
+    edges: dict[tuple[str, str], set[tuple[str, str]]],
+) -> list[tuple[str, str]] | None:
+    """Return one cycle (as an ordered node path closing on itself) or ``None``.
+
+    Plain DFS with white/grey/black colouring. Iteration is ``sorted`` so the
+    reported cycle is deterministic across runs / Python versions.
+    """
+    WHITE, GREY, BLACK = 0, 1, 2
+    color: dict[tuple[str, str], int] = {}
+    stack: list[tuple[str, str]] = []
+
+    def visit(node: tuple[str, str]) -> list[tuple[str, str]] | None:
+        color[node] = GREY
+        stack.append(node)
+        for nxt in sorted(edges.get(node, ())):
+            state = color.get(nxt, WHITE)
+            if state == GREY:
+                return [*stack[stack.index(nxt) :], nxt]
+            if state == WHITE and nxt in edges:
+                found = visit(nxt)
+                if found is not None:
+                    return found
+        stack.pop()
+        color[node] = BLACK
+        return None
+
+    for start in sorted(edges):
+        if color.get(start, WHITE) == WHITE:
+            found = visit(start)
+            if found is not None:
+                return found
+    return None
 
 
 def field_backing_model_errors(definition: Definition, relation: Relation) -> list[str]:

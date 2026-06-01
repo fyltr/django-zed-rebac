@@ -291,3 +291,79 @@ def test_const_reverse_enumerates_via_base_manager(backend, posts):
     ids = set(backend.accessible(subject=_user("alice"), action="read", resource_type="blog/post"))
     assert ids == {str(pk) for pk in Post._base_manager.values_list("pk", flat=True)}
     assert len(ids) == Post._base_manager.count() == len(posts)
+
+
+def test_system_check_reports_const_target_without_definition(db):
+    # A const relation's target type must resolve to a schema definition;
+    # a typo (here `org/role` is simply never defined) would otherwise make the
+    # arrow walk silently deny. blog/post has a Django model, so the only issue
+    # is the undefined target.
+    from rebac.backends import backend as active_backend
+    from rebac.backends import reset_backend
+    from rebac.checks import check_field_backed_relations
+
+    reset_backend()
+    active_backend().set_schema(
+        parse_zed(
+            """
+            definition blog/post {
+                relation admin: org/role // rebac:const=admin
+                permission read = admin->member
+            }
+            """
+        )
+    )
+
+    issues = check_field_backed_relations()
+
+    assert any(
+        issue.id == "rebac.E009"
+        and "has no schema definition" in issue.msg
+        and "org/role" in issue.msg
+        for issue in issues
+    )
+
+
+def test_system_check_reports_const_arrow_cycle(db):
+    # Two types whose const arrows point at each other recurse to the depth
+    # limit on every check; the E010 check catches it at load instead.
+    from rebac.backends import backend as active_backend
+    from rebac.backends import reset_backend
+    from rebac.checks import check_field_backed_relations
+
+    reset_backend()
+    active_backend().set_schema(
+        parse_zed(
+            """
+            definition blog/post {
+                relation peer: blog/folder // rebac:const=x
+                permission p = peer->p
+            }
+            definition blog/folder {
+                relation peer: blog/post // rebac:const=x
+                permission p = peer->p
+            }
+            """
+        )
+    )
+
+    issues = check_field_backed_relations()
+
+    assert any(issue.id == "rebac.E010" and "arrow cycle" in issue.msg for issue in issues)
+
+
+def test_system_check_passes_for_acyclic_const_arrow(db):
+    # Guard against false positives: the canonical admin->member schema has no
+    # const-arrow cycle and an org/role definition, so neither E010 nor the
+    # target-type E009 fires.
+    from rebac.backends import backend as active_backend
+    from rebac.backends import reset_backend
+    from rebac.checks import check_field_backed_relations
+
+    reset_backend()
+    active_backend().set_schema(parse_zed(SCHEMA_TEXT))
+
+    issues = check_field_backed_relations()
+
+    assert not any(issue.id == "rebac.E010" for issue in issues)
+    assert not any("has no schema definition" in issue.msg for issue in issues)
