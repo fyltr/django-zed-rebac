@@ -128,7 +128,9 @@ class RebacBackend:
         except LookupError:
             return False
 
-        rebac_types = [model_resource_type(model) for model in cfg.get_models(include_auto_created=False)]
+        rebac_types = [
+            model_resource_type(model) for model in cfg.get_models(include_auto_created=False)
+        ]
         rebac_types = [t for t in rebac_types if t]
         if not rebac_types:
             return False

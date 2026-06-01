@@ -193,3 +193,22 @@ def test_optimizer_scopes_reverse_prefetch_and_reflects_revoke(alice):
 
     assert second.errors is None
     assert second.data == {"folders": [{"name": "root", "posts": [{"title": "visible"}]}]}
+
+
+def test_pin_current_actor_preserves_ambient_sudo(alice):
+    """Ambient sudo must survive the optimizer — the queryset is not re-scoped.
+
+    ``ActorMiddleware``'s superuser bypass (and any explicit ``sudo()`` block)
+    opens ambient sudo while ``current_actor()`` still returns the actor; without
+    the ``is_sudo()`` guard the optimizer would pin that actor and silently
+    defeat the bypass.
+    """
+    from rebac.graphql.strawberry_django import _pin_current_actor
+
+    with actor_context(alice):
+        pinned = _pin_current_actor(Post.objects.all())
+    assert getattr(pinned, "_rebac_actor", None) is not None
+
+    with actor_context(alice), sudo(reason="test.pin"):
+        unscoped = _pin_current_actor(Post.objects.all())
+    assert getattr(unscoped, "_rebac_actor", None) is None

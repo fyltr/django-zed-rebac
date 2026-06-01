@@ -140,7 +140,7 @@ The same flow works in DRF, Celery tasks, GraphQL resolvers, management commands
 |---|---|---|
 | **Subject** | Who is acting. A typed reference: `subject_type:subject_id`. | `auth/user:42`, `agents/agent:claude_v3` |
 | **Resource** | What is being acted upon. A typed reference. | `blog/post:99` |
-| **Relation** | A typed link from a subject to a resource. Usually rows in the `Relationship` table; field-backed structural relations are sourced from a Django FK. | `blog/post:99 #owner @ auth/user:42` |
+| **Relation** | A typed link from a subject to a resource. Usually rows in the `Relationship` table; field-backed relations are sourced from a Django FK and const-backed relations resolve to one fixed object id. | `blog/post:99 #owner @ auth/user:42` |
 | **Permission** | A computed expression over relations. Never stored, always evaluated. | `permission read = owner + viewer` |
 | **Caveat** | A CEL expression evaluated at check time against runtime context. | `permission read = viewer with ip_in_cidr` |
 
@@ -213,6 +213,46 @@ subject sets, wildcards, specific ids, caveats, or expiration; the `rebac.E009`
 system check verifies that the Django field exists and points at the declared
 resource type. A future `SpiceDBBackend` projector should use the same
 metadata to materialize those structural relations into SpiceDB tuples.
+
+### Const-backed (synthetic) relations
+
+A relation may instead be annotated with `// rebac:const=<id>` to resolve to one
+fixed object id for *every* row of the declaring type, with no stored tuple and
+no model column:
+
+```zed
+definition blog/post {
+    relation admin: angee/role // rebac:const=admin
+    permission read = owner + admin->member
+}
+```
+
+Every `blog/post` behaves as if it held `#admin @ angee/role:admin`, so
+`admin->member` is "is the actor a member of `angee/role:admin`?" — answered from
+that one role's membership rows, never a per-post grant. This is the schema-level
+"static relationship" SpiceDB never shipped (issues #346 / #1266); it is the
+idiomatic way to express GCP-IAM's "a role bound at a scope covers every resource
+under it" without a container object. It shares the field-backing constraints
+(exactly one concrete subject type; no subject sets, wildcards, ids, caveats, or
+expiration), parses to `ConstBinding` on `Relation.backing`, persists as
+`{"kind": "const", "target_id": ...}`, and `rebac.E009` requires the declaring
+type to have a Django model (the const *target* need not — it is typically a
+virtual role namespace).
+
+Resolution is fixed-target rather than per-row, which has two consequences in
+`LocalBackend`:
+
+- **`accessible()` is whole-type, not enumerated.** Because the target object is
+  the same for every row, `grants_all()` answers "does the subject hold `target`
+  on `const:<id>`?" with a single check; when true the queryset layer adds *no*
+  `id__in` filter (it would otherwise list the entire table). `lookup_subjects`
+  and direct (`permission x = const_relation`) references resolve to the fixed
+  target the same way.
+- **SpiceDB projection is one tuple per source row.** Unlike field-backing's
+  one-tuple-per-FK, a `SpiceDBBackend` projector must materialize the synthetic
+  edge for every row of the source type (or model it as a `parent`/`platform`
+  hierarchy), since SpiceDB has no static-relationship primitive. The local
+  synthesis stays free of that cost.
 
 ---
 

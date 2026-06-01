@@ -34,6 +34,19 @@ pre-1.0; breaking changes within a minor version are explicitly called out.
   was wired up, so the direct/`lookup_subjects` paths silently denied even the
   const target subject. `accessible()` over a direct const reference likewise
   returns every row of the source type when the const target grants.
+- The Strawberry-Django optimizer now honours **ambient** sudo: `_pin_current_actor`
+  leaves a queryset unscoped when `is_sudo()` is active (the `ActorMiddleware`
+  superuser bypass or an explicit `sudo()` block), not only when a sudo reason is
+  stamped on the queryset. Previously the optimizer re-pinned the current actor
+  and silently defeated the bypass at the queryset layer.
+
+### Performance
+
+- A granting const arrow now reports `grants_all()` as the whole-type grant it
+  is, so queryset scoping takes the unrestricted path (adds no filter) instead
+  of enumerating every row of the source type into an `id__in` clause. Since the
+  arrow's target object is fixed, this is a single check rather than a full-table
+  materialisation — important for "admin sees everything" reads at scale.
 
 ### Tooling
 

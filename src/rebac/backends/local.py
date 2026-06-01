@@ -247,12 +247,14 @@ class LocalBackend(Backend):
                 )
                 backing: FieldBinding | ConstBinding | None = None
                 if r.backing:
-                    if str(r.backing.get("kind", "fk")) == "const":
+                    kind = str(r.backing.get("kind", "fk"))
+                    if kind == "const":
                         backing = ConstBinding(target_id=str(r.backing["target_id"]))
+                    elif kind == "fk":
+                        backing = FieldBinding(attname=str(r.backing["attname"]), kind="fk")
                     else:
-                        backing = FieldBinding(
-                            attname=str(r.backing["attname"]),
-                            kind=str(r.backing.get("kind", "fk")),
+                        raise SchemaError(
+                            f"{d.resource_type}#{r.name}: unknown relation backing kind {kind!r}"
                         )
                 relations.append(Relation(r.name, allowed, r.with_expiration, backing))
             permissions: list[Permission] = []
@@ -574,7 +576,7 @@ class LocalBackend(Backend):
         backed = self._field_backed_relation_for_filter(filter_.resource_type, filter_.relation)
         if backed is not None:
             resource_type, relation = backed
-            raise self._field_backed_write_error(resource_type, relation)
+            raise self._backed_write_error(resource_type, relation)
 
         with transaction.atomic():
             qs = RelationshipModel.objects.all()
@@ -612,7 +614,7 @@ class LocalBackend(Backend):
         if definition is not None:
             relation = _find_relation(definition, tuple_.relation)
             if relation is not None and relation.backing is not None:
-                raise self._field_backed_write_error(tuple_.resource.resource_type, relation)
+                raise self._backed_write_error(tuple_.resource.resource_type, relation)
         with transaction.atomic():
             RelationshipModel.objects.filter(
                 resource_type=tuple_.resource.resource_type,
@@ -847,7 +849,33 @@ class LocalBackend(Backend):
                 seen={*seen, key},
             )
         if isinstance(expr, PermArrow):
-            return False
+            via_relation = _find_relation(definition, expr.via)
+            if via_relation is None:
+                return False
+            const_backing = resolve_const_backing(definition, via_relation)
+            if const_backing is None:
+                # Field-backed / stored arrows resolve to a per-row target, so
+                # they cannot grant the whole type uniformly — defer to the
+                # per-row enumeration in `accessible()`.
+                return False
+            # A const arrow points every row at the same fixed object, so the
+            # subject grants the entire type iff it holds `target` on that one
+            # object. One check — no per-row enumeration, no `id__in` filter
+            # (which would otherwise list the whole table). Conditional/None
+            # is treated conservatively as "not a blanket grant".
+            target_def = self.schema().get_definition(const_backing.target_resource_type)
+            if target_def is None:
+                return False
+            return (
+                self._eval_permission_on(
+                    permission_name=expr.target,
+                    definition=target_def,
+                    resource_id=const_backing.target_id,
+                    subject=subject,
+                    depth=0,
+                )
+                is True
+            )
         if isinstance(expr, PermBinOp):
             left = self._expr_grants_all(expr.left, definition, subject, seen=seen)
             if expr.op == "+":
@@ -1400,14 +1428,14 @@ class LocalBackend(Backend):
         if relation is None:
             raise ValueError(f"unknown relation: {tup.resource.resource_type}#{tup.relation}")
         if relation.backing is not None:
-            raise self._field_backed_write_error(tup.resource.resource_type, relation)
+            raise self._backed_write_error(tup.resource.resource_type, relation)
         if not _subject_allowed_by_relation(relation, tup.subject):
             raise ValueError(
                 f"subject {tup.subject} is not allowed for "
                 f"{tup.resource.resource_type}#{tup.relation}"
             )
 
-    def _field_backed_write_error(self, resource_type: str, relation: Relation) -> SchemaError:
+    def _backed_write_error(self, resource_type: str, relation: Relation) -> SchemaError:
         if isinstance(relation.backing, ConstBinding):
             return SchemaError(
                 f"relation `{relation.name}` on `{resource_type}` is const-backed "

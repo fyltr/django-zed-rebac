@@ -123,6 +123,19 @@ def test_accessible_returns_all_rows_when_const_target_grants(backend, posts):
     assert bob_ids == {str(posts[0].pk)}  # owner grant only
 
 
+def test_grants_all_short_circuits_const_arrow_without_enumeration(backend, posts):
+    # A granting const arrow covers the whole type, so the queryset layer must
+    # take the unrestricted path (no id__in filter) rather than enumerate every
+    # row. A subject who is not the const target's member gets no blanket grant.
+    _grant_admin(backend, "alice")
+    assert (
+        backend.grants_all(subject=_user("alice"), action="read", resource_type="blog/post") is True
+    )
+    assert (
+        backend.grants_all(subject=_user("bob"), action="read", resource_type="blog/post") is False
+    )
+
+
 def test_tuple_writes_to_const_relation_are_rejected(backend, posts):
     with pytest.raises(SchemaError, match=r"const-backed.*synthetic"):
         backend.write_relationships(
