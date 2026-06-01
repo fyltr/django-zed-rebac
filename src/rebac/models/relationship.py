@@ -17,6 +17,7 @@ returns the one selected by the setting. The wire shape (``RelationshipTuple``
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import Any
 
 from django.db import models
@@ -185,7 +186,7 @@ class RelationshipRegistryManager(models.Manager.from_queryset(RelationshipRegis
         # Eager-join the FK rows. Engine code reads ``row.resource_type``
         # / ``row.subject_id`` per-row, so without select_related the
         # per-row property accessors would issue N queries.
-        qs: RelationshipRegistryQuerySet = super().get_queryset()
+        qs: RelationshipRegistryQuerySet = super().get_queryset()  # pyright: ignore[reportAssignmentType]
         return qs.select_related("resource_fk", "subject_fk")
 
     def create(self, **kwargs: Any) -> RelationshipRegistry:
@@ -194,7 +195,7 @@ class RelationshipRegistryManager(models.Manager.from_queryset(RelationshipRegis
 
     def get_or_create(
         self,
-        defaults: dict[str, Any] | None = None,
+        defaults: Mapping[str, Any] | None = None,
         **kwargs: Any,
     ) -> tuple[RelationshipRegistry, bool]:
         kwargs = self._translate_write_kwargs(kwargs)
@@ -205,8 +206,8 @@ class RelationshipRegistryManager(models.Manager.from_queryset(RelationshipRegis
 
     def update_or_create(
         self,
-        defaults: dict[str, Any] | None = None,
-        create_defaults: dict[str, Any] | None = None,
+        defaults: Mapping[str, Any] | None = None,
+        create_defaults: Mapping[str, Any] | None = None,
         **kwargs: Any,
     ) -> tuple[RelationshipRegistry, bool]:
         kwargs = self._translate_write_kwargs(kwargs)

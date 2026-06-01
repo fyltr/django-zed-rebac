@@ -146,6 +146,33 @@ that the named field exists and points at the schema's declared type. The
 `rebac build-zed` output omits the comment directive, so the emitted schema
 remains valid SpiceDB `.zed`.
 
+A relation can instead be declared **const-backed** — resolving to one fixed
+object id for *every* row of the declaring type, with no stored tuple and no
+model field:
+
+```zed
+definition blog/post {
+    relation owner: auth/user             // rebac:field=author
+    relation admin: angee/role            // rebac:const=admin
+
+    permission read = owner + admin->member
+}
+```
+
+Here `post#admin` resolves to `angee/role:admin` for every post, so
+`admin->member` is "is the actor a member of `angee/role:admin`?" — answered
+from the single role-membership tuples, never a per-post grant. This is the
+schema-level "static relationship" SpiceDB never shipped (issues #346 / #1266);
+it is the idiomatic way to express GCP-IAM's "admin at a scope covers every
+resource under it" without a container model. The same single-concrete-type
+constraints as field-backing apply, and `rebac.E009` verifies the declaring
+type has a Django model (the target type need not — it is typically a virtual
+role namespace such as `angee/role`). In reverse (`accessible`), a const arrow
+returns *every* row of the source type when the constant target grants access —
+the intended "covers any `<type>`" semantics. Like field-backing, this is a
+`LocalBackend` synthesis with no SpiceDB equivalent; a SpiceDB backend would
+need the edge materialised as tuples.
+
 **Permissions** — computed expressions over relations:
 
 ```zed

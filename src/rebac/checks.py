@@ -104,7 +104,7 @@ def check_field_backed_relations(
     try:
         from .backends import backend as _backend
         from .backends.base import Backend
-        from .field_backing import field_backing_model_errors
+        from .field_backing import const_backing_model_errors, field_backing_model_errors
 
         b: Backend = _backend()
         if not hasattr(b, "schema"):
@@ -120,6 +120,8 @@ def check_field_backed_relations(
     for definition in schema.definitions:
         for relation in definition.relations:
             for error in field_backing_model_errors(definition, relation):
+                issues.append(checks.Error(error, id="rebac.E009"))
+            for error in const_backing_model_errors(definition, relation):
                 issues.append(checks.Error(error, id="rebac.E009"))
     return issues
 

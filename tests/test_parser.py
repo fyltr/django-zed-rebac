@@ -8,6 +8,7 @@ import pytest
 
 from rebac.schema import (
     AllowedSubject,
+    ConstBinding,
     FieldBinding,
     PermArrow,
     PermBinOp,
@@ -139,6 +140,81 @@ def test_validate_schema_rejects_non_concrete_field_backed_relations(
 
     errors = validate_schema(schema)
     assert any("blog/post#folder" in error and expected in error for error in errors)
+
+
+@pytest.mark.parametrize(
+    "relation_line, expected",
+    [
+        ("relation folder: blog/folder | auth/user // rebac:const=root", "exactly one"),
+        ("relation folder: blog/folder#member // rebac:const=root", "concrete type"),
+        ("relation folder: blog/folder:* // rebac:const=root", "concrete type"),
+        ("relation folder: blog/folder:other // rebac:const=root", "concrete type"),
+        ("relation folder: blog/folder with expiration // rebac:const=root", "expiration"),
+        ("relation folder: blog/folder with ip_in_cidr // rebac:const=root", "caveat"),
+    ],
+)
+def test_validate_schema_rejects_non_concrete_const_backed_relations(
+    relation_line: str,
+    expected: str,
+) -> None:
+    # Const-backing carries the same single-concrete-type constraints as
+    # field-backing — the shared "backed relation" validation enforces both.
+    schema = parse_zed(
+        f"""
+        caveat ip_in_cidr(ip ipaddress, cidr string) {{
+            ip.in_cidr(cidr)
+        }}
+        definition auth/user {{}}
+        definition blog/folder {{
+            relation member: auth/user
+        }}
+        definition blog/post {{
+            {relation_line}
+        }}
+        """
+    )
+
+    errors = validate_schema(schema)
+    assert any("blog/post#folder" in error and expected in error for error in errors)
+
+
+def test_relation_declaring_both_field_and_const_backing_is_rejected() -> None:
+    # A relation has exactly one backing slot; both directives in the relation's
+    # line span is a ParseError (they cannot share one line — each anchors to
+    # end-of-comment — so this spreads them across a two-line subject union).
+    with pytest.raises(ParseError, match=r"both rebac:field and rebac:const"):
+        parse_zed(
+            """
+            definition auth/user {}
+            definition blog/folder {}
+            definition blog/post {
+                relation folder: blog/folder |  // rebac:field=folder
+                    blog/other  // rebac:const=root
+            }
+            """
+        )
+
+
+@pytest.mark.parametrize(
+    "const_id",
+    ["role-admin", "01HZX9K7Q2P3R4S5", "a|b", "ns/admin", "a=b", "a+b"],
+)
+def test_const_directive_accepts_spicedb_object_ids(const_id: str) -> None:
+    # The const target is a SpiceDB object id, not a Python identifier: hyphens,
+    # ULIDs/sqids (leading digit), and `| / = +` must round-trip rather than be
+    # silently dropped as an un-backed relation.
+    schema = parse_zed(
+        f"""
+        definition auth/user {{}}
+        definition org/role {{ relation member: auth/user }}
+        definition blog/post {{
+            relation admin: org/role // rebac:const={const_id}
+        }}
+        """
+    )
+
+    admin = next(r for r in _relations(schema, "blog/post") if r.name == "admin")
+    assert admin.backing == ConstBinding(target_id=const_id)
 
 
 def test_permission_expression_precedence():

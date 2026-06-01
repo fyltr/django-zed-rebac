@@ -54,11 +54,30 @@ class FieldBinding:
 
 
 @dataclass(frozen=True, slots=True)
+class ConstBinding:
+    """A synthetic relation that resolves to one fixed object id for every row.
+
+    Declared with ``// rebac:const=<id>`` on a single-subject relation: every
+    object of the declaring type behaves as if it held
+    ``<relation>@<subject_type>:<id>``, with no stored tuple and no model field.
+    It is the schema-level "static relationship" SpiceDB never shipped (issue
+    #346 / #1266); the local backend synthesises the edge at evaluation time, so
+    a tuple-only backend would have to materialise it instead.
+
+    Mirrors :class:`FieldBinding`'s ``kind`` discriminator so ``Relation.backing``
+    stays one switchable slot.
+    """
+
+    target_id: str
+    kind: str = "const"
+
+
+@dataclass(frozen=True, slots=True)
 class Relation:
     name: str
     allowed_subjects: tuple[AllowedSubject, ...]
     with_expiration: bool = False
-    backing: FieldBinding | None = None
+    backing: FieldBinding | ConstBinding | None = None
 
 
 # ---------- Permission expression AST ----------

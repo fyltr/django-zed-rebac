@@ -141,8 +141,7 @@ class Command(BaseCommand):
                 previous = seen_caveats.get(caveat.name)
                 if previous is not None:
                     raise CommandError(
-                        f"Duplicate caveat {caveat.name!r} found in "
-                        f"{previous} and {package_name}"
+                        f"Duplicate caveat {caveat.name!r} found in {previous} and {package_name}"
                     )
                 seen_caveats[caveat.name] = package_name
             if selected:
@@ -189,7 +188,9 @@ class Command(BaseCommand):
                         force=force,
                     )
                     any_drift = any_drift or drift
-                    schema_def = SchemaDefinition.objects.filter(resource_type=d.resource_type).first()
+                    schema_def = SchemaDefinition.objects.filter(
+                        resource_type=d.resource_type
+                    ).first()
                     if schema_def is None:
                         continue
 
@@ -214,9 +215,11 @@ class Command(BaseCommand):
                             payload={
                                 "allowed_subjects": allowed,
                                 "backing": (
-                                    {"attname": r.backing.attname, "kind": r.backing.kind}
-                                    if r.backing is not None
-                                    else None
+                                    None
+                                    if r.backing is None
+                                    else {"kind": "const", "target_id": r.backing.target_id}
+                                    if r.backing.kind == "const"
+                                    else {"attname": r.backing.attname, "kind": r.backing.kind}
                                 ),
                                 "caveat": "",
                                 "with_expiration": r.with_expiration,
@@ -436,7 +439,9 @@ class Command(BaseCommand):
                 )
             return True
 
-        for record in sorted(stale, key=lambda record: _stale_record_prune_order(record.external_id)):
+        for record in sorted(
+            stale, key=lambda record: _stale_record_prune_order(record.external_id)
+        ):
             target = record.target
             if target is not None:
                 target.delete()

@@ -41,7 +41,9 @@ class RebacPermission(BasePermission):  # type: ignore[misc]  # untyped third-pa
 
     action_map = _DEFAULT_ACTION_MAP
 
-    def has_permission(self, request: Any, view: Any) -> bool:
+    # pyright infers BasePermission's `return True` body as `Literal[True]`;
+    # widening to `bool` is the correct override, not an incompatibility.
+    def has_permission(self, request: Any, view: Any) -> bool:  # pyright: ignore[reportIncompatibleMethodOverride]
         action_name = getattr(view, "action", None) or request.method.lower()
         rebac_action = self.action_map.get(action_name)
         if rebac_action is None:
@@ -63,7 +65,7 @@ class RebacPermission(BasePermission):  # type: ignore[misc]  # untyped third-pa
             resource=ObjectRef(rebac_type, ""),
         )
 
-    def has_object_permission(self, request: Any, view: Any, obj: Any) -> bool:
+    def has_object_permission(self, request: Any, view: Any, obj: Any) -> bool:  # pyright: ignore[reportIncompatibleMethodOverride]
         action_name = getattr(view, "action", None) or request.method.lower()
         rebac_action = self.action_map.get(action_name)
         if rebac_action is None:

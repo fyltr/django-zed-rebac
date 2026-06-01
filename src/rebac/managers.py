@@ -141,9 +141,13 @@ class RebacQuerySet(models.QuerySet[_M]):
             return clone
         from .relation_loading import selected_related_paths
 
-        paths = tuple(str(field) for field in fields) if fields else selected_related_paths(
-            self.model,
-            clone.query.select_related,
+        paths = (
+            tuple(str(field) for field in fields)
+            if fields
+            else selected_related_paths(
+                self.model,
+                clone.query.select_related,
+            )
         )
         clone._rebac_select_related_guards = tuple(
             dict.fromkeys((*self._rebac_select_related_guards, *paths))
@@ -225,6 +229,7 @@ class RebacQuerySet(models.QuerySet[_M]):
         from django.db.models import Q
 
         from .backends import backend
+
         action = str(
             self._rebac_action or getattr(self.model._meta, "rebac_default_action", "read")
         )
@@ -530,10 +535,13 @@ class RebacManager(models.Manager.from_queryset(RebacQuerySet)):  # type: ignore
     """
 
     def get_queryset(self) -> RebacQuerySet[Any]:
-        qs: RebacQuerySet[Any] = self._queryset_class(
+        # `_queryset_class` / `_hints` are BaseManager internals; the dynamic
+        # `from_queryset` base erases them from pyright's view (mypy sees them
+        # via django-stubs). We know the queryset class is RebacQuerySet.
+        qs: RebacQuerySet[Any] = self._queryset_class(  # pyright: ignore[reportAttributeAccessIssue]
             model=self.model,
             using=self._db,
-            hints=self._hints,
+            hints=self._hints,  # pyright: ignore[reportAttributeAccessIssue]
         )
         return qs
 

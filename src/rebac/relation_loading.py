@@ -266,11 +266,11 @@ def _scoped_queryset_for_prefetch[M: models.Model](
     if actor is not None and not queryset_has_rebac_scope(queryset):
         with_actor = getattr(queryset, "with_actor", None)
         if callable(with_actor):
-            queryset = with_actor(actor)
+            queryset = cast(QuerySet[M], with_actor(actor))
     if mode is not None and getattr(queryset, "_rebac_field_deny", None) is None:
         on_field_deny = getattr(queryset, "on_field_deny", None)
         if callable(on_field_deny):
-            queryset = on_field_deny(mode)
+            queryset = cast(QuerySet[M], on_field_deny(mode))
     return _ensure_resource_id_loaded(queryset, model)
 
 

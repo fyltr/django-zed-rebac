@@ -42,11 +42,18 @@ from django.db.models import QuerySet
 
 from ..conf import app_settings
 from ..errors import PermissionDepthExceeded, SchemaError
-from ..field_backing import ResolvedFieldBacking, resolve_field_backing
+from ..field_backing import (
+    ResolvedConstBacking,
+    ResolvedFieldBacking,
+    resolve_const_backing,
+    resolve_field_backing,
+)
 from ..schema.ast import (
     BUILTIN_ACTOR_TYPES,
     AllowedSubject,
+    ConstBinding,
     Definition,
+    FieldBinding,
     PermArrow,
     PermBinOp,
     PermExpr,
@@ -208,6 +215,7 @@ class LocalBackend(Backend):
         from ..schema.ast import (
             Caveat,
             CaveatParam,
+            ConstBinding,
             Definition,
             FieldBinding,
             Permission,
@@ -237,12 +245,15 @@ class LocalBackend(Backend):
                     )
                     for item in (r.allowed_subjects or [])
                 )
-                backing = None
+                backing: FieldBinding | ConstBinding | None = None
                 if r.backing:
-                    backing = FieldBinding(
-                        attname=str(r.backing["attname"]),
-                        kind=str(r.backing.get("kind", "fk")),
-                    )
+                    if str(r.backing.get("kind", "fk")) == "const":
+                        backing = ConstBinding(target_id=str(r.backing["target_id"]))
+                    else:
+                        backing = FieldBinding(
+                            attname=str(r.backing["attname"]),
+                            kind=str(r.backing.get("kind", "fk")),
+                        )
                 relations.append(Relation(r.name, allowed, r.with_expiration, backing))
             permissions: list[Permission] = []
             for p in d.permissions.all():
@@ -461,32 +472,43 @@ class LocalBackend(Backend):
             if action in relation_by_name:
                 relation_names = [action]
         else:
-            relation_names = sorted(_collect_direct_relations(permission.expression) & relation_by_name.keys())
+            relation_names = sorted(
+                _collect_direct_relations(permission.expression) & relation_by_name.keys()
+            )
 
         if not relation_names:
             return []
 
-        field_backed_subjects: list[SubjectRef] = []
+        synthetic_subjects: list[SubjectRef] = []
         stored_relation_names: list[str] = []
         for relation_name in relation_names:
             relation_def = relation_by_name[relation_name]
             field_backing = self._resolve_declared_field_backing(definition, relation_def)
-            if field_backing is None:
-                stored_relation_names.append(relation_name)
+            if field_backing is not None:
+                if subject_type != field_backing.target_resource_type:
+                    continue
+                values = field_backing.source_model._base_manager.filter(
+                    **field_backing.source_filter(resource.resource_id)
+                ).values_list(field_backing.target_values_path(), flat=True)
+                for value in values:
+                    if value is not None:
+                        synthetic_subjects.append(
+                            SubjectRef.of(field_backing.target_resource_type, str(value))
+                        )
                 continue
-            if subject_type != field_backing.target_resource_type:
-                continue
-            values = field_backing.source_model._base_manager.filter(
-                **field_backing.source_filter(resource.resource_id)
-            ).values_list(field_backing.target_values_path(), flat=True)
-            for value in values:
-                if value is not None:
-                    field_backed_subjects.append(
-                        SubjectRef.of(field_backing.target_resource_type, str(value))
+            const_backing = self._resolve_declared_const_backing(definition, relation_def)
+            if const_backing is not None:
+                # One fixed subject holds the relation on every resource of this
+                # type; surface it when the caller asked for that subject type.
+                if subject_type == const_backing.target_resource_type:
+                    synthetic_subjects.append(
+                        SubjectRef.of(const_backing.target_resource_type, const_backing.target_id)
                     )
+                continue
+            stored_relation_names.append(relation_name)
 
         if not stored_relation_names:
-            return field_backed_subjects
+            return synthetic_subjects
 
         with _freshness_scope(cutoff):
             rows = self._apply_freshness(
@@ -502,7 +524,7 @@ class LocalBackend(Backend):
                 for r in rows
                 if _row_allowed_by_relation(relation_by_name[r.relation], r)
             ]
-            return [*field_backed_subjects, *stored_subjects]
+            return [*synthetic_subjects, *stored_subjects]
 
     def write_relationships(self, writes: Iterable[RelationshipTuple]) -> Zookie:
         from django.db import transaction
@@ -690,6 +712,15 @@ class LocalBackend(Backend):
                 depth=depth,
             )
 
+        const_backing = self._resolve_declared_const_backing(definition, via_relation)
+        if const_backing is not None:
+            return self._walk_const_arrow(
+                ctx=ctx,
+                const_backing=const_backing,
+                target=target,
+                depth=depth,
+            )
+
         RelationshipModel = active_relationship_model()
         targets = self._apply_freshness(
             RelationshipModel.objects.filter(
@@ -763,6 +794,29 @@ class LocalBackend(Backend):
         if saw_conditional:
             return None
         return False
+
+    def _walk_const_arrow(
+        self,
+        ctx: WalkContext,
+        const_backing: ResolvedConstBacking,
+        target: str,
+        depth: int,
+    ) -> bool | None:
+        # The arrow target object is fixed by the schema, so there is no row to
+        # read: evaluate `target` on the constant object directly. The same
+        # `const:default` is shared by every source object — that is the point.
+        target_def = ctx.schema.get_definition(const_backing.target_resource_type)
+        if target_def is None:
+            return False
+        return self._eval_permission_on(
+            permission_name=target,
+            definition=target_def,
+            resource_id=const_backing.target_id,
+            subject=ctx.subject,
+            depth=depth + 1,
+            context=ctx.context,
+            missing=ctx.missing,
+        )
 
     def _expr_grants_all(
         self,
@@ -882,6 +936,16 @@ class LocalBackend(Backend):
                 **field_backing.source_filter(resource_id),
                 **field_backing.target_filter(subject),
             ).exists()
+
+        const_backing = self._resolve_declared_const_backing(definition, relation_def)
+        if const_backing is not None:
+            # Every row behaves as if it held `#<relation> @ <const target>`, so
+            # the relation is held only by that fixed subject. No tuple, no query.
+            if not _subject_allowed_by_relation(relation_def, subject):
+                return False
+            return subject == SubjectRef.of(
+                const_backing.target_resource_type, const_backing.target_id
+            )
 
         RelationshipModel = active_relationship_model()
 
@@ -1039,6 +1103,15 @@ class LocalBackend(Backend):
                     cache=cache,
                     context=context,
                 )
+            const_backing = self._resolve_declared_const_backing(definition, via_rel)
+            if const_backing is not None:
+                return self._resources_via_const_arrow(
+                    const_backing=const_backing,
+                    target=expr.target,
+                    subject=subject,
+                    depth=depth,
+                    context=context,
+                )
             results: set[str] = set()
             target_types = sorted({s.type for s in via_rel.allowed_subjects})
             for target_type in target_types:
@@ -1106,8 +1179,42 @@ class LocalBackend(Backend):
             **field_backing.target_in_filter(target_resource_ids)
         )
         return {
+            str(value) for value in rows.values_list(field_backing.source_values_path(), flat=True)
+        }
+
+    def _resources_via_const_arrow(
+        self,
+        *,
+        const_backing: ResolvedConstBacking,
+        target: str,
+        subject: SubjectRef,
+        depth: int,
+        context: dict[str, Any] | None,
+    ) -> set[str]:
+        # The target object is fixed, so this is one check, not an enumeration:
+        # either the subject holds `target` on `const:default` — in which case
+        # every row of the source type is reachable — or none is. Returning the
+        # whole id set is the intended "covers any <type>" semantics; it is the
+        # same cost as any grant that lets a subject see the entire table.
+        target_def = self.schema().get_definition(const_backing.target_resource_type)
+        if target_def is None:
+            return set()
+        granted = self._eval_permission_on(
+            permission_name=target,
+            definition=target_def,
+            resource_id=const_backing.target_id,
+            subject=subject,
+            depth=depth + 1,
+            context=context,
+            missing=None,
+        )
+        if granted is not True:
+            return set()
+        return {
             str(value)
-            for value in rows.values_list(field_backing.source_values_path(), flat=True)
+            for value in const_backing.source_model._base_manager.values_list(
+                const_backing.source_values_path(), flat=True
+            )
         }
 
     def _compute_accessible_for(
@@ -1192,6 +1299,23 @@ class LocalBackend(Backend):
                 for value in rows.values_list(field_backing.source_values_path(), flat=True)
             }
 
+        const_backing = self._resolve_declared_const_backing(definition, relation_def)
+        if const_backing is not None:
+            # The relation is held only by the fixed const target; when the
+            # subject is that target, every row of the source type carries it.
+            if not _subject_allowed_by_relation(relation_def, subject):
+                return set()
+            if subject != SubjectRef.of(
+                const_backing.target_resource_type, const_backing.target_id
+            ):
+                return set()
+            return {
+                str(value)
+                for value in const_backing.source_model._base_manager.values_list(
+                    const_backing.source_values_path(), flat=True
+                )
+            }
+
         RelationshipModel = active_relationship_model()
 
         result: set[str] = set()
@@ -1274,9 +1398,7 @@ class LocalBackend(Backend):
             raise ValueError(f"unknown resource type: {tup.resource.resource_type}")
         relation = _find_relation(definition, tup.relation)
         if relation is None:
-            raise ValueError(
-                f"unknown relation: {tup.resource.resource_type}#{tup.relation}"
-            )
+            raise ValueError(f"unknown relation: {tup.resource.resource_type}#{tup.relation}")
         if relation.backing is not None:
             raise self._field_backed_write_error(tup.resource.resource_type, relation)
         if not _subject_allowed_by_relation(relation, tup.subject):
@@ -1286,8 +1408,17 @@ class LocalBackend(Backend):
             )
 
     def _field_backed_write_error(self, resource_type: str, relation: Relation) -> SchemaError:
+        if isinstance(relation.backing, ConstBinding):
+            return SchemaError(
+                f"relation `{relation.name}` on `{resource_type}` is const-backed "
+                f"(rebac:const={relation.backing.target_id}); it is synthetic and holds no tuples"
+            )
         model_hint = resource_type
-        field_hint = relation.backing.attname if relation.backing is not None else relation.name
+        field_hint = (
+            relation.backing.attname
+            if isinstance(relation.backing, FieldBinding)
+            else relation.name
+        )
         definition = self.schema().get_definition(resource_type)
         if definition is not None:
             field_backing = resolve_field_backing(definition, relation)
@@ -1304,7 +1435,7 @@ class LocalBackend(Backend):
         definition: Definition,
         relation: Relation,
     ) -> ResolvedFieldBacking | None:
-        if relation.backing is None:
+        if not isinstance(relation.backing, FieldBinding):
             return None
         field_backing = resolve_field_backing(definition, relation)
         if field_backing is None:
@@ -1313,6 +1444,21 @@ class LocalBackend(Backend):
                 "field-backed relation could not be resolved; run `manage.py check --tag rebac`"
             )
         return field_backing
+
+    def _resolve_declared_const_backing(
+        self,
+        definition: Definition,
+        relation: Relation,
+    ) -> ResolvedConstBacking | None:
+        if not isinstance(relation.backing, ConstBinding):
+            return None
+        const_backing = resolve_const_backing(definition, relation)
+        if const_backing is None:
+            raise SchemaError(
+                f"{definition.resource_type}#{relation.name}: "
+                "const-backed relation could not be resolved; run `manage.py check --tag rebac`"
+            )
+        return const_backing
 
     def _field_backed_relation_for_filter(
         self,

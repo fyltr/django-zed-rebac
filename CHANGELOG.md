@@ -5,6 +5,49 @@ pre-1.0; breaking changes within a minor version are explicitly called out.
 
 ## [Unreleased]
 
+## [0.10.0] — 2026-06-01
+
+### Added
+
+- Added const-backed (synthetic) relations via `// rebac:const=<id>`: a relation
+  that resolves to one fixed object id for every row of the declaring type, with
+  no stored tuple and no model field. This is the schema-level "static
+  relationship" SpiceDB never shipped (issues #346 / #1266); `LocalBackend`
+  synthesises the edge at evaluation time. The canonical use is a universal-admin
+  arrow — `relation admin: angee/role // rebac:const=admin` with
+  `permission read = owner + admin->member` — so admin reach is one role
+  membership, not one `Relationship` row per resource.
+- Added `ConstBinding` AST node, parser support, `SchemaRelation.backing`
+  round-tripping for `{"kind": "const", "target_id": ...}`, and `rebac.E009`
+  system-check coverage for const bindings on types with no Django model.
+- `// rebac:const=<id>` accepts the full SpiceDB object-id grammar (hyphens,
+  leading digits / ULIDs / sqids, and `/ _ | = +`), not just Python-identifier
+  ids — a target id like `role-admin` no longer silently parses as un-backed.
+
+### Fixed
+
+- Tuple writes/deletes to const-backed relations now raise `SchemaError`
+  (the relation is synthetic and holds no tuples).
+- Const-backed relations referenced **directly** in a permission expression
+  (`permission read = admin`) and surfaced via `lookup_subjects` now resolve
+  to the fixed const target; previously only the arrow form (`admin->member`)
+  was wired up, so the direct/`lookup_subjects` paths silently denied even the
+  const target subject. `accessible()` over a direct const reference likewise
+  returns every row of the source type when the const target grants.
+
+### Tooling
+
+- Added `pyright` to the `dev` extra and a `[tool.pyright]` config; `src/` is now
+  clean under both `mypy --strict` and `pyright` (Django reverse-manager / FK
+  `_id` / dynamic-manager gaps are bridged with typed `TYPE_CHECKING`
+  annotations and narrow per-line ignores, since `pyright` has no django-stubs
+  plugin).
+
+### Notes
+
+- Like field-backing, const-backing is a `LocalBackend` synthesis with no SpiceDB
+  equivalent; a SpiceDB backend would need the edge materialised as tuples.
+
 ## [0.9.0] — 2026-05-30
 
 ### Added

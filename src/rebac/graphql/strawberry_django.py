@@ -91,9 +91,7 @@ class RebacDjangoOptimizerExtension(_DjangoOptimizerExtension):
 
         if isinstance(ret, QuerySet) and ret._result_cache is None:
             config = OptimizerConfig(
-                enable_only=(
-                    self.enable_only and info.operation.operation == OperationType.QUERY
-                ),
+                enable_only=(self.enable_only and info.operation.operation == OperationType.QUERY),
                 enable_select_related=self.enable_select_related,
                 enable_prefetch_related=self.enable_prefetch_related,
                 enable_annotate=self.enable_annotate_optimization,
@@ -156,7 +154,7 @@ def _apply_rebac_relation_loading[M: models.Model](qs: QuerySet[M]) -> QuerySet[
         if callable(rebac_select_related):
             qs = cast(QuerySet[M], rebac_select_related(*paths))
 
-    prefetches = tuple(getattr(qs, "_prefetch_related_lookups", ()) or ())
+    prefetches: tuple[Any, ...] = tuple(getattr(qs, "_prefetch_related_lookups", ()) or ())
     if prefetches:
         cleared = qs.prefetch_related(None)
         rebac_prefetch_related = getattr(cleared, "rebac_prefetch_related", None)

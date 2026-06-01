@@ -103,7 +103,9 @@ class RebacResource(models.Model):
                     "object_pk": object_pk or "",
                 },
             )
-            if not created and content_type is not None and obj.content_type_id is None:
+            # `content_type_id` is the FK's implicit `_id` column — django-stubs
+            # generates it for mypy; pyright (no plugin) doesn't see it.
+            if not created and content_type is not None and obj.content_type_id is None:  # pyright: ignore[reportAttributeAccessIssue]
                 # Fill backing pointer lazily; never overwrite an existing one.
                 obj.content_type = content_type
                 obj.object_pk = object_pk or ""

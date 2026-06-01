@@ -200,7 +200,9 @@ def grant(*, actor: ActorLike, role: str | ObjectRef) -> Relationship:
                 )
             ]
         )
-        return Relationship.objects.get(
+        # `Relationship` is the active model — a union of the two storage
+        # shapes; mypy narrows it via django-stubs, pyright keeps the union.
+        return Relationship.objects.get(  # pyright: ignore[reportReturnType]
             resource_type=role_ref.resource_type,
             resource_id=role_ref.resource_id,
             relation=ROLE_RELATION,
@@ -356,7 +358,7 @@ def imply(*, parent: str | ObjectRef, child: str | ObjectRef) -> Relationship:
     # Wrap write + read-back: same DoesNotExist race as ``grant``.
     with transaction.atomic():
         write_relationships([tuple_])
-        return Relationship.objects.get(
+        return Relationship.objects.get(  # pyright: ignore[reportReturnType]
             resource_type=parent_ref.resource_type,
             resource_id=parent_ref.resource_id,
             relation=ROLE_INCLUDES_RELATION,

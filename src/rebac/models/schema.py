@@ -2,11 +2,22 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from django.db import models
+
+if TYPE_CHECKING:
+    from django.db.models.fields.related_descriptors import RelatedManager
 
 
 class SchemaDefinition(models.Model):
     resource_type = models.CharField(max_length=64, unique=True)
+
+    if TYPE_CHECKING:
+        # Reverse accessors for the FKs below. django-stubs synthesises these
+        # for mypy via its plugin; pyright (no plugin) needs them spelled out.
+        relations: RelatedManager[SchemaRelation]
+        permissions: RelatedManager[SchemaPermission]
 
     class Meta:
         app_label = "rebac"

@@ -12,7 +12,7 @@ from django.db import models
 from ._id import resource_id_attr, subject_id_attr
 from .conf import app_settings
 from .resources import model_for_resource_type, model_resource_type
-from .schema.ast import Definition, Relation
+from .schema.ast import ConstBinding, Definition, FieldBinding, Relation
 from .types import SubjectRef
 
 
@@ -52,6 +52,30 @@ class ResolvedFieldBacking:
         return f"{self.field.name}__{self.target_id_attr}"
 
 
+@dataclass(frozen=True, slots=True)
+class ResolvedConstBacking:
+    """A const-backed relation resolved against the declaring Django model.
+
+    Unlike :class:`ResolvedFieldBacking` there is no source field and the
+    target object id is fixed for every row, so the forward direction needs no
+    query at all; only the reverse (``accessible``) direction touches the DB,
+    to enumerate every row of the source type when the constant target grants
+    access.
+    """
+
+    source_model: type[models.Model]
+    relation: Relation
+    target_resource_type: str
+    target_id: str
+
+    @property
+    def source_id_attr(self) -> str:
+        return resource_id_attr(self.source_model)
+
+    def source_values_path(self) -> str:
+        return self.source_id_attr
+
+
 def resolve_field_backing(
     definition: Definition,
     relation: Relation,
@@ -63,9 +87,7 @@ def resolve_field_backing(
     startup; hot-path authorization calls fail closed.
     """
     backing = relation.backing
-    if backing is None:
-        return None
-    if backing.kind != "fk" or len(relation.allowed_subjects) != 1:
+    if not isinstance(backing, FieldBinding) or len(relation.allowed_subjects) != 1:
         return None
 
     allowed = relation.allowed_subjects[0]
@@ -91,10 +113,50 @@ def resolve_field_backing(
     )
 
 
+def resolve_const_backing(
+    definition: Definition,
+    relation: Relation,
+) -> ResolvedConstBacking | None:
+    """Resolve a ``// rebac:const=...`` binding to concrete Django metadata.
+
+    Returns ``None`` when the binding is not a const backing or the declaring
+    type has no loaded Django model. The target type need not be a model (it is
+    commonly a virtual role namespace such as ``angee/role``); only the source
+    type must be one, because the reverse direction enumerates its rows.
+    """
+    backing = relation.backing
+    if not isinstance(backing, ConstBinding):
+        return None
+    if len(relation.allowed_subjects) != 1:
+        return None
+    allowed = relation.allowed_subjects[0]
+    source_model = model_for_resource_type(definition.resource_type)
+    if source_model is None:
+        return None
+    return ResolvedConstBacking(
+        source_model,
+        relation,
+        allowed.type,
+        backing.target_id,
+    )
+
+
+def const_backing_model_errors(definition: Definition, relation: Relation) -> list[str]:
+    """Return Django-model validation errors for a const-backed relation."""
+    if not isinstance(relation.backing, ConstBinding):
+        return []
+    if model_for_resource_type(definition.resource_type) is None:
+        return [
+            f"{definition.resource_type}#{relation.name}: const-backed relation "
+            "requires a Django model with matching Meta.rebac_resource_type"
+        ]
+    return []
+
+
 def field_backing_model_errors(definition: Definition, relation: Relation) -> list[str]:
     """Return Django-model validation errors for a field-backed relation."""
     backing = relation.backing
-    if backing is None:
+    if not isinstance(backing, FieldBinding):
         return []
 
     errors: list[str] = []
